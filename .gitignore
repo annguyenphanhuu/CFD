@@ -2,6 +2,7 @@ output_folder/
 training_GAN_CFD
 training_GAN_CFD/
 model_evaluation/
+REPORT/
 Case_5.zip
 Case_10.zip
 test_interpolate.py
