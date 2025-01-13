@@ -11,9 +11,19 @@ import skfmm
 import argparse
 import shutil
 
-def extract_zip(zip_path, extract_to):
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        zip_ref.extractall(extract_to)
+def extract_zip(zip_folder_path, extract_to):
+    try:
+        with zipfile.ZipFile(zip_folder_path, 'r') as zip_ref:
+            for file in zip_ref.namelist():
+                try:
+                    zip_ref.extract(file, extract_to)
+                    #print(f"Unzip: {file}")
+                except Exception as e:
+                    print(f"Skip error filefile {file}: {e}")
+    except zipfile.BadZipFile:
+        print(f"Error ZIP {zip_folder_path}")
+    except Exception as e:
+        print(f"Catch Error: {e}")
 
 def process_zip_folder(zip_folder_path, output_folder):
     # Extract the initial zip folder containing multiple zip files
@@ -29,7 +39,10 @@ def process_zip_folder(zip_folder_path, output_folder):
         folder_extract_path.mkdir(parents=True, exist_ok=True)
         print(f"Extracting {zip_file} to {folder_extract_path}")
         extract_zip(zip_file, folder_extract_path)
-
+        try:
+            zip_file.unlink()
+        except Exception as e:
+            print(f"Error deleting {zip_file}: {e}")
         # Locate the nested folder containing midBox.csv
         nested_folders = folder_extract_path / folder_name / "postProcessing" / "boxUniform"
         if nested_folders.exists():

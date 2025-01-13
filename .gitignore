@@ -1,9 +1,11 @@
 output_folder/
-training_GAN_CFD
+training_GAN_CFD_1/
 training_GAN_CFD/
 model_evaluation/
 REPORT/
 Case_5.zip
 Case_10.zip
+Case_100.zip
+Case_100_processed.zip
 test_interpolate.py
 train_fit.py

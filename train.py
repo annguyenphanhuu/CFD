@@ -27,13 +27,12 @@ from tensorflow.keras import regularizers
 from tensorflow.keras.layers import Conv2D,Conv2DTranspose,LeakyReLU,concatenate
 from tensorflow.keras.layers import Dense,Reshape,Flatten,Activation,Concatenate
 from tensorflow.keras.layers import Dropout,BatchNormalization
-from tensorflow.keras.activations import swish
 import argparse
 
 parser = argparse.ArgumentParser(description='Input option for training GAN CFD model')
 parser.add_argument("-c", "--checkpoint", default=False, help="Whether load checkpoint for training", type=Boolean)
 parser.add_argument("-e", "--epocheval", default=5, help="Number of epoch for each evaluation", type=int)
-parser.add_argument("-n", "--numepoch", default=3000, help="Number of epoch for training iteration", type=int)
+parser.add_argument("-n", "--numepoch", default=20000, help="Number of epoch for training iteration", type=int)
 parser.add_argument("-d", "--directory", default='training_GAN_CFD/', help="training directory output", type=str)
 args = parser.parse_args()
 
@@ -50,10 +49,10 @@ def define_discriminator(image_shape):
 	# concatenate images channel-wise
 	merged = Concatenate()([in_src_image, in_target_image])
 	# C64
-	d = Conv2D(64, (4,4), strides=(2,2), padding='same', kernel_initializer=init)(merged)
+	d = Conv2D(128, (4,4), strides=(2,2), padding='same', kernel_initializer=init)(merged)
 	d = LeakyReLU(alpha=0.2)(d)
 	# C128
-	d = Conv2D(128, (4,4), strides=(2,2), padding='same', kernel_initializer=init)(d)
+	d = Conv2D(256, (4,4), strides=(2,2), padding='same', kernel_initializer=init)(d)
 	d = BatchNormalization()(d)
 	d = LeakyReLU(alpha=0.2)(d)
 	# C256
@@ -61,11 +60,11 @@ def define_discriminator(image_shape):
 	d = BatchNormalization()(d)
 	d = LeakyReLU(alpha=0.2)(d)
 	# C512
-	d = Conv2D(256, (4,4), strides=(2,2), padding='same', kernel_initializer=init)(d)
+	d = Conv2D(512, (4,4), strides=(2,2), padding='same', kernel_initializer=init)(d)
 	d = BatchNormalization()(d)
 	d = LeakyReLU(alpha=0.2)(d)
 	# second last output layer
-	d = Conv2D(512, (4,4), padding='same', kernel_initializer=init)(d)
+	d = Conv2D(1024, (4,4), padding='same', kernel_initializer=init)(d)
 	d = BatchNormalization()(d)
 	d = LeakyReLU(alpha=0.2)(d)
 	# patch output as 16x16 PatchGAN model
@@ -75,8 +74,8 @@ def define_discriminator(image_shape):
 	model = Model([in_src_image, in_target_image], patch_out)
 	# compile model
 	opt = Adam(learning_rate=0.0002, beta_1=0.5)
-	# slow weight update to 0.5 in respect to generator
-	model.compile(loss='binary_crossentropy', optimizer=opt, loss_weights=[0.5])
+	# slow weight update to 1 in respect to generator
+	model.compile(loss='binary_crossentropy', optimizer=opt, loss_weights=[1])
 	return model
 
 # define an encoder block
@@ -272,30 +271,33 @@ def plot_image(var, pretext, fieldname, flag, vmin=None, vmax=None):
     
 # generate samples and save as a plot and save the model
 def summarize_performance(step, g_model, x_test_1, y_test_2, test_size, field):
-    # Generate a batch of fake samples
-    ix = random.randint(0, test_size - 1)
-    X_fakeB, _ = generate_fake_samples(g_model, x_test_1[[ix]], 1)
+	# Generate a batch of fake samples
+	ix = random.randint(0, test_size - 1)
+	X_fakeB, _ = generate_fake_samples(g_model, x_test_1[[ix]], 1)
 
-    X = x_test_1[ix]
-    X = np.squeeze(X, axis=2)
-    y = X_fakeB[0]
-    y = np.squeeze(y, axis=2)
-    Y = y_test_2[ix]
-    Y = np.squeeze(Y, axis=2)
+	X = x_test_1[ix]
+	X = np.squeeze(X, axis=2)
+	y = X_fakeB[0]
+	y = np.squeeze(y, axis=2)
+	Y = y_test_2[ix]
+	Y = np.squeeze(Y, axis=2)
 
-    y_error = abs(Y - y)
+	y_error = abs(Y - y)
 
-    print('X shape', X.shape)
-    print('Y shape', Y.shape)
-    print('y shape', y.shape)
+	vmin = max(y_error.min(), Y.min(), y.min())
+	vmax = max(y_error.max(), Y.max(), y.max())
 
-    # Plot each variable with its own min and max
-    plot_image(X, str(step + 1) + '_Boundary_', field, 1, vmin=X.min(), vmax=X.max())
-    plot_image(Y, str(step + 1) + '_CFD_', field, 3, vmin=Y.min(), vmax=Y.max())
-    plot_image(y, str(step + 1) + '_Predict_', field, 3, vmin=y.min(), vmax=y.max())
+	print('X shape', X.shape)
+	print('Y shape', Y.shape)
+	print('y shape', y.shape)
 
-    # Calculate and plot the error
-    plot_image(y_error, str(step + 1) + '_error_abs_', field, 3, vmin=y_error.min(), vmax=y_error.max())
+	# Plot each variable with its own min and max
+	plot_image(X, str(step + 1) + '_Boundary_', field, 1, vmin=X.min(), vmax=X.max())
+	plot_image(Y, str(step + 1) + '_CFD_', field, 3, vmin=vmin, vmax=vmax)
+	plot_image(y, str(step + 1) + '_Predict_', field, 3, vmin=vmin, vmax=vmax)
+
+	# Calculate and plot the error
+	plot_image(y_error, str(step + 1) + '_error_abs_', field, 3, vmin=vmin, vmax=vmax)
 	
 
 def print_memory_usage():
@@ -356,14 +358,15 @@ def train(d_model, g_model, gan_model, n_epochs=args.numepoch, batch_size=1):
 			else:
 				print('error data list!')
 		
-	
+	train_size = int(0.85 * len(bnd_array))
+	test_size = len(bnd_array) - train_size
 
-	x_train_1 = bnd_array[:1000]
-	x_test_1 = bnd_array[-190:]
+	x_train_1 = bnd_array[:train_size]
+	x_test_1 = bnd_array[-test_size:]
 	# y_train_1 = sflow_P_array[:1000]
 	# y_test_1 = sflow_P_array[-190:]
-	y_train_2 = sflow_U_array[:1000]
-	y_test_2 = sflow_U_array[-190:]
+	y_train_2 = sflow_U_array[:train_size]
+	y_test_2 = sflow_U_array[-test_size:]
 	data_size = len(x_train_1)
 	test_size = len(x_test_1)
 
@@ -409,9 +412,19 @@ def train(d_model, g_model, gan_model, n_epochs=args.numepoch, batch_size=1):
 	total_val = []
 	min_eval = -1
 
+	dir_name = './training_GAN_CFD/'
+	if not os.path.exists(dir_name):
+		os.makedirs(dir_name)
+
+	try:
+		with open(dir_name + 'steps.txt', 'r') as f:
+			start_step = int(f.read().strip())
+	except FileNotFoundError:
+		start_step = 0
+
 	init_t = time.time()
 	# manually enumerate epochs
-	for i in range(n_steps): # batch count
+	for i in range(start_step, n_steps): # batch count
 		gc.collect()
 		# get dataset index for each epoch
 		ix = i % bat_per_epo
@@ -443,7 +456,9 @@ def train(d_model, g_model, gan_model, n_epochs=args.numepoch, batch_size=1):
 		g_  += g_loss
 
 		#print_memory_usage()
-
+		
+		with open(dir_name + 'steps.txt', 'w') as f:
+				f.write(str(i + 1))
 
 		# summarize model performance
 		if (ix+1) % (bat_per_epo) == 0:
@@ -461,10 +476,6 @@ def train(d_model, g_model, gan_model, n_epochs=args.numepoch, batch_size=1):
 			val_loss = val_loss / test_size
 			
 			if min_eval == -1 or val_loss < min_eval:
-				#Create training folder
-				dir_name = './training_GAN_CFD/'
-				if not os.path.exists(dir_name):
-					os.makedirs(dir_name)
 				# save the generator model
 				min_eval = val_loss
 				filename2 = dir_name + "model_eval.keras"
@@ -517,6 +528,7 @@ def train(d_model, g_model, gan_model, n_epochs=args.numepoch, batch_size=1):
 				filename3 = dir_model_name+ "model_GAN.keras"
 				save_model(gan_model, filename3, overwrite=True, include_optimizer=True)
 				print('---->Saved checkpoint: %s' % (filename1))
+
 			init_t = time.time()
             
 # LOAD TRAINING CHECKPOINTS
