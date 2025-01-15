@@ -29,17 +29,27 @@ from tensorflow.keras.layers import Dense,Reshape,Flatten,Activation,Concatenate
 from tensorflow.keras.layers import Dropout,BatchNormalization
 import argparse
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('true'):
+        return True
+    elif v.lower() in ('false'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 parser = argparse.ArgumentParser(description='Input option for training GAN CFD model')
-parser.add_argument("-c", "--checkpoint", default=False, help="Whether load checkpoint for training", type=Boolean)
+parser.add_argument("-c", "--checkpoint", default=False, help="Whether load checkpoint for training", type=str2bool)
 parser.add_argument("-e", "--epocheval", default=5, help="Number of epoch for each evaluation", type=int)
-parser.add_argument("-n", "--numepoch", default=20000, help="Number of epoch for training iteration", type=int)
+parser.add_argument("-n", "--numepoch", default=10000, help="Number of epoch for training iteration", type=int)
 parser.add_argument("-d", "--directory", default='training_GAN_CFD/', help="training directory output", type=str)
 args = parser.parse_args()
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # define the discriminator model
-def define_discriminator(image_shape):
+def define_discriminator(image_shape = (64,512,1)):
 	# weight initialization
 	init = RandomNormal(stddev=0.02)
 	# source image input
@@ -109,39 +119,38 @@ def decoder_block(layer_in, skip_in, n_filters, dropout=True):
 	return g
 
 # define the standalone generator model
-def define_generator(image_shape):
-    # weight initialization
-    init = RandomNormal(stddev=0.02)
-    
-    # Image input
-    in_image = Input(shape=image_shape)
-    
-    # Encoder model with increased filters
-    e1 = define_encoder_block(in_image, 128, batchnorm=False)  # (None, 32, 256, 128)
-    e2 = define_encoder_block(e1, 256)  # (None, 16, 128, 256)
-    e3 = define_encoder_block(e2, 512)  # (None, 8, 64, 512)
-    e4 = define_encoder_block(e3, 1024)  # (None, 4, 32, 1024)
-    e5 = define_encoder_block(e4, 1024)  # (None, 2, 16, 1024) 
+def define_generator(image_shape = (64,512,1)):
+	# weight initialization
+	init = RandomNormal(stddev=0.02)
 
-    # Bottleneck with residual connection
-    b = Conv2D(512, (4,4), strides=(2,2), padding='same', kernel_initializer=init)(e5)
-    b = Activation('relu')(b)
-	
-    # Decoder model with increased complexity and residual connections
-    d1 = decoder_block(b, e5, 1024)
-    d2 = decoder_block(d1, e4, 1024)  
-    d3 = decoder_block(d2, e3, 512)
-    d4 = decoder_block(d3, e2, 512, dropout=False)
-    d5 = decoder_block(d4, e1, 256, dropout=False)
+	# Image input
+	in_image = Input(shape=image_shape)
 
-    # Output layer with increased complexity
-    g = Conv2DTranspose(1, (4,4), strides=(2,2), padding='same', kernel_initializer=init)(d5)
-    out_image = Activation('sigmoid')(g)
-    
-    # Define model
-    model = Model(in_image, out_image)
-    
-    return model
+	# Encoder model with increased filters
+	e1 = define_encoder_block(in_image, 256, batchnorm=False) 
+	e2 = define_encoder_block(e1, 512)
+	e3 = define_encoder_block(e2, 512) 
+	e4 = define_encoder_block(e3, 1024) 
+	e5 = define_encoder_block(e4, 1024) 
+
+	# Bottleneck with residual connection
+	#b = Conv2D(512, (4,4), strides=(2,2), padding='same', kernel_initializer=init)(e5)
+	b = Conv2D(1024, (4,4), strides=(2,2), padding='same', kernel_initializer=init)(e5)
+	b = Activation('relu')(b)
+
+
+	# Decoder model with increased complexity and residual connections
+	d1 = decoder_block(b, e5, 1024)
+	d2 = decoder_block(d1, e4, 1024)  
+	d3 = decoder_block(d2, e3, 512)
+	d4 = decoder_block(d3, e2, 512, dropout=False)
+	d5 = decoder_block(d4, e1, 256, dropout=False)
+	# Output
+	g = Conv2DTranspose(1, (4,4), strides=(2,2), padding='same', kernel_initializer=init)(d5)
+	out_image = Activation('sigmoid')(g)
+	# Define model
+	model = Model(in_image, out_image)
+	return model
 
 # define the combined generator and discriminator model, for updating the generator
 def define_gan(g_model, d_model, image_shape):
@@ -159,7 +168,7 @@ def define_gan(g_model, d_model, image_shape):
 	model = Model(in_src, [dis_out, gen_out])
 	# compile model
 	opt = Adam(learning_rate=0.0004, beta_1=0.5)
-	model.compile(loss=['binary_crossentropy', 'mae'], optimizer=opt, loss_weights=[1,100])
+	model.compile(loss=['binary_crossentropy', 'mae'], optimizer=opt, loss_weights=[1,1000])
 	return model
 
 # select a batch of random samples, returns images and target
@@ -247,7 +256,7 @@ def plot_image(var, pretext, fieldname, flag, vmin=None, vmax=None):
     if flag == 1:
         labeltxt = 'SDF Boundary'
     elif flag == 2:
-        labeltxt = 'Pressure (Pa)'
+        labeltxt = 'Pressure (N)'
     elif flag == 3:
         labeltxt = 'U mean (m/s)'
 
@@ -329,9 +338,9 @@ def train(d_model, g_model, gan_model, n_epochs=args.numepoch, batch_size=1):
 			# Map data into the domain (4x50 mm)
 			for i in range(40):
 				for j in range(500):
-					p[i, j] = P_array[j + i * 500]
-					u[i, j] = U_array[j + i * 500]
-					if P_array[j + i * 500] == 0:
+					p[i, j] = P_array[i * 500 + j]
+					u[i, j] = U_array[i * 500 + j]
+					if P_array[i * 500 + j] == 0:
 						pts[i, j] = 1
 					else:
 						pts[i, j] = -1
@@ -363,18 +372,18 @@ def train(d_model, g_model, gan_model, n_epochs=args.numepoch, batch_size=1):
 
 	x_train_1 = bnd_array[:train_size]
 	x_test_1 = bnd_array[-test_size:]
-	# y_train_1 = sflow_P_array[:1000]
-	# y_test_1 = sflow_P_array[-190:]
+	y_train_1 = sflow_P_array[:1000]
+	y_test_1 = sflow_P_array[-190:]
 	y_train_2 = sflow_U_array[:train_size]
 	y_test_2 = sflow_U_array[-test_size:]
 	data_size = len(x_train_1)
 	test_size = len(x_test_1)
 
 	x_train_1 = np.asarray(x_train_1).astype('float32')
-	# y_train_1 = np.asarray(y_train_1).astype('float32')
+	y_train_1 = np.asarray(y_train_1).astype('float32')
 	y_train_2 = np.asarray(y_train_2).astype('float32')
 	x_train_1 = np.expand_dims(x_train_1,axis=3)
-	# y_train_1 = np.expand_dims(y_train_1,axis=3)
+	y_train_1 = np.expand_dims(y_train_1,axis=3)
 	y_train_2 = np.expand_dims(y_train_2,axis=3)
 
 	# normalize data to range [0,1]
@@ -384,19 +393,19 @@ def train(d_model, g_model, gan_model, n_epochs=args.numepoch, batch_size=1):
 	# y_train_1 = (y_train_1 - 0.5) / 0.5
 
 	x_test_1 = np.asarray(x_test_1).astype('float32')
-	# y_test_1 = np.asarray(y_test_1).astype('float32')
+	y_test_1 = np.asarray(y_test_1).astype('float32')
 	y_test_2 = np.asarray(y_test_2).astype('float32')
 	x_test_1 = np.expand_dims(x_test_1,axis=3)
-	# y_test_1 = np.expand_dims(y_test_1,axis=3)
+	y_test_1 = np.expand_dims(y_test_1,axis=3)
 	y_test_2 = np.expand_dims(y_test_2,axis=3)
 	# y_test_2 = (y_test_2 - U_min) / (U_max - U_min)
 	# y_test_1 = (y_test_1 - 0.5) / 0.5
 	
 	print('x1 shape',x_train_1.shape)
-	# print('y1 shape',y_train_1.shape,y_train_1.min(),y_train_1.max())
+	print('y1 shape',y_train_1.shape,y_train_1.min(),y_train_1.max())
 	print('y2 shape',y_train_2.shape,y_train_2.min(),y_train_2.max())
 	print('x1 test shape',x_test_1.shape)
-	# print('y1 test shape',y_test_1.shape,y_test_1.min(),y_test_1.max())
+	print('y1 test shape',y_test_1.shape,y_test_1.min(),y_test_1.max())
 	print('y2 test shape',y_test_2.shape,y_test_2.min(),y_test_2.max())
  
 	# calculate the number of batches per training epoch
@@ -415,11 +424,15 @@ def train(d_model, g_model, gan_model, n_epochs=args.numepoch, batch_size=1):
 	dir_name = './training_GAN_CFD/'
 	if not os.path.exists(dir_name):
 		os.makedirs(dir_name)
-
-	try:
-		with open(dir_name + 'steps.txt', 'r') as f:
-			start_step = int(f.read().strip())
-	except FileNotFoundError:
+	
+	if chkpt == True:
+		try:
+			with open(dir_name + 'steps.txt', 'r') as f:
+				start_step = int(f.read().strip())
+			start_step = (start_step // data_size) * data_size
+		except FileNotFoundError:
+			start_step = 0
+	else:
 		start_step = 0
 
 	init_t = time.time()
@@ -517,7 +530,7 @@ def train(d_model, g_model, gan_model, n_epochs=args.numepoch, batch_size=1):
 			plt.savefig('./training_GAN_CFD/validation_loss.png')
 			plt.close('all')
 
-			if (i+1) % (bat_per_epo * 10) == 0:
+			if (i+1) % (bat_per_epo) == 0:
 				dir_model_name = './training_GAN_CFD/model_ckpt/'
 				if not os.path.exists(dir_model_name):
 					os.makedirs(dir_model_name)
@@ -532,7 +545,6 @@ def train(d_model, g_model, gan_model, n_epochs=args.numepoch, batch_size=1):
 			init_t = time.time()
             
 # LOAD TRAINING CHECKPOINTS
-
 image_shape = (64,512,1)
 chkpt = args.checkpoint
 
@@ -542,9 +554,9 @@ if chkpt == True:
 	gan_model = load_model('./training_GAN_CFD/model_ckpt/model_GAN.keras')
 else:
 	# define the models
-	d_model = define_discriminator(image_shape) #(None, 4, 32, 1)
-	g_model = define_generator(image_shape)	#(None, 64, 512, 1)
-	gan_model = define_gan(g_model, d_model, image_shape)	#[(None, 4, 32, 1), (None, 64, 512, 1)]
+	d_model = define_discriminator(image_shape)
+	g_model = define_generator(image_shape)
+	gan_model = define_gan(g_model, d_model, image_shape)
 
 # train model
 # print(d_model.summary())

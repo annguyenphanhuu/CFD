@@ -189,11 +189,11 @@ for file_path in os.listdir(processed_folder):
       print('error data list!')
 
 x_train_1 = bnd_array[:1000]
-x_test_1 = bnd_array[-216:]
+x_test_1 = bnd_array[-15:]
 y_train_1 = sflow_P_array[:1000]
-y_test_1 = sflow_P_array[-216:]
+y_test_1 = sflow_P_array[-15:]
 y_train_2 = sflow_U_array[:1000]
-y_test_2 = sflow_U_array[-216:]
+y_test_2 = sflow_U_array[-15:]
 
 x_train_1 = np.asarray(x_train_1).astype('float32')
 y_train_1 = np.asarray(y_train_1).astype('float32')
@@ -245,34 +245,31 @@ with open('./model_evaluation/error_test_UX_ibm_cylinder.csv', "w") as csv_file:
     #plot_image(X,str(ix)+'_Boundary_',field,1)
     plot_image(Y,str(ix)+'_CFD_',field,flag, vmin=vmin, vmax=vmax)
     plot_image(y,str(ix)+'_Predict_',field,flag, vmin=vmin, vmax=vmax)
-
+    plot_image(y_error,str(ix)+'_error_abs_', field, 3, vmin=vmin, vmax=vmax)
     
     ymax = Y.max()
     ymean = np.mean(y_test_1[ix])
     print('ymax', ymax, ' at test ID: ',str(ix))
-    sum_err = 0
-    for i in range(64):
-      for j in range(512):
-        # y_error[i,j] = abs(Y[i,j] - y[i,j])*100/Y_max # global
-        y_error[i,j] = abs(Y[i,j] - y[i,j])
-        sum_err += y_error[i,j]
 
+    sum_err = np.sum(y_error)
     err_avg = sum_err/(64*512)
     print('Error average: ',err_avg)
     sum_error += err_avg
 
-    plot_image(y_error,str(ix)+'_error_abs_', field, 3, vmin=vmin, vmax=vmax)
-
-
-    
-    
-
-    
     # y_error = y_error*100/ymax
     Error_mean = np.asarray(y_error.max(axis=0))
     Error_max = Error_mean.max()
+
+    max_index = np.argmax(y_error)
+    max_index = np.unravel_index(max_index, y_error.shape)
+    Error_percentage_max = (y_error[max_index] / Y[max_index]) * 100
+
+    Error_percentage_avg = np.sum(np.where(Y == 0, 0, (y_error / Y) * 100)) / (64*512)
+
     print('Error max:',Error_max)
-    writer.writerow([str(ix),str(Error_max)])
+    print('Error percentage max:',Error_percentage_max)
+    print('Error percentage average:',Error_percentage_avg)
+    writer.writerow([str(ix),str(Error_percentage_max)])
 
     Error_list.append(Error_mean)
 

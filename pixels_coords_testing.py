@@ -183,7 +183,7 @@ def plot_image(var, pretext, fieldname, flag, output_dir):
     if flag == 1:
         labeltxt = 'SDF Boundary'
     elif flag == 2:
-        labeltxt = 'Pressure (Pa)'
+        labeltxt = 'Pressure (N)'
     elif flag == 3:
         labeltxt = 'U mean (m/s)'
 
@@ -303,7 +303,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process and extract data from a zip file containing CSVs.')
     
     # Add arguments with default values
-    parser.add_argument('--zip_path', type=str, nargs='?', default='./Case_10.zip', help='Path to the zip folder (default: ./Case_15.zip).')
+    parser.add_argument('--zip_path', type=str, nargs='?', default='./Case_100.zip', help='Path to the zip folder (default: ./Case_15.zip).')
     parser.add_argument('--output_folder', type=str, nargs='?', default='./output_folder', help='Directory where extracted and processed files will be saved (default: ./output_folder).')
 
     # Parse arguments
