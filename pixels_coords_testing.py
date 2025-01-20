@@ -11,6 +11,55 @@ import skfmm
 import argparse
 import shutil
 
+def load_data(data_file, nx, ny, nx_new, ny_new):
+    try:
+        # Read data
+        data = pd.read_csv(data_file)
+        
+        # Check exist column
+        required_columns = ['y_center', 'z_center', 'p_center', 'Umean_center']
+        if not all(col in data.columns for col in required_columns):
+            print("Missing required columns in CSV file!")
+            return []
+        
+        # Get column's value
+        xlist = data['y_center'].values
+        ylist = data['z_center'].values
+        temp = data['p_center'].values
+        vx = data['Umean_center'].values
+        
+        # Process
+        data_size = nx * ny
+        if len(xlist) == data_size:
+            if nx == nx_new or nx_new is None:
+                xcor = np.ones((nx, ny))
+                ycor = np.ones((nx, ny))
+                P_array = np.ones((nx, ny))
+                U_array = np.ones((nx, ny))
+                for i in range(nx):
+                    for j in range(ny):
+                        xcor[i, j] = xlist[(j + nx * i)]
+                        ycor[i, j] = ylist[(j + nx * i)]
+                        P_array[i, j] = temp[(j + nx * i)]
+                        U_array[i, j] = vx[(j + nx * i)]
+            else:
+                # Interpolate
+                XN, YN = np.meshgrid(
+                    np.linspace(min(xlist), max(xlist), nx_new),
+                    np.linspace(min(ylist), max(ylist), ny_new),
+                )
+                P_array = griddata((xlist, ylist), temp, (XN, YN), method='nearest')
+                U_array = griddata((xlist, ylist), vx, (XN, YN), method='nearest')
+                xcor = XN
+                ycor = YN
+            return xcor, ycor, P_array, U_array
+        else:
+            print("Missing data file!")
+            return []
+    except ValueError as e:
+        print(f"Error processing data file: {e}")
+        return []
+
 def extract_zip(zip_folder_path, extract_to):
     try:
         with zipfile.ZipFile(zip_folder_path, 'r') as zip_ref:
@@ -19,7 +68,7 @@ def extract_zip(zip_folder_path, extract_to):
                     zip_ref.extract(file, extract_to)
                     #print(f"Unzip: {file}")
                 except Exception as e:
-                    print(f"Skip error filefile {file}: {e}")
+                    print(f"Skip error file {file}: {e}")
     except zipfile.BadZipFile:
         print(f"Error ZIP {zip_folder_path}")
     except Exception as e:
@@ -108,7 +157,8 @@ def process_csv_with_pixel_coordinates_nearest(input_csv, output_csv):
     z_range_physical = 50e-3  # 50mm
 
     # Desired pixel dimensions
-    ny_final, nz_final = 40, 500
+    #ny_final, nz_final = 40, 500
+    ny_final, nz_final = height, width
 
     # Pixel sizes
     dy_final, dz_final = y_range_physical / ny_final, z_range_physical / nz_final   # 0.0001m/pixel
@@ -128,6 +178,10 @@ def process_csv_with_pixel_coordinates_nearest(input_csv, output_csv):
     Y_all = arr[:, 1]  # y coordinates (meters)
     Z_all = arr[:, 2]  # z coordinates (meters)
     P_all = arr[:, 3]  # pressure
+    # Replace Pressure < 0 to Pressure = 0
+    P_all[P_all < 0] = 0
+    # N -> Pa
+    P_all *= 1072.033
     U_all = arr[:, 4]  # velocity magnitude
     points = np.column_stack((Y_all, Z_all))
 
@@ -183,11 +237,10 @@ def plot_image(var, pretext, fieldname, flag, output_dir):
     if flag == 1:
         labeltxt = 'SDF Boundary'
     elif flag == 2:
-        labeltxt = 'Pressure (N)'
+        labeltxt = 'Pressure (Pa)'
     elif flag == 3:
         labeltxt = 'U mean (m/s)'
-
-    Z, Y = np.meshgrid(np.linspace(0, 50, 500), np.linspace(0, 4, 40))
+    Z, Y = np.meshgrid(np.linspace(0, 50, var.shape[1]), np.linspace(0, 4, var.shape[0]))
     fig = plt.figure()
 
     plt.gca().set_aspect('equal', adjustable='box')
@@ -224,7 +277,7 @@ def generate_sdf_visualization(phi, output_dir, case_name):
     plt.savefig(output_dir / f"{case_name}_SDF_contour.png")
     plt.close()
 
-def process_csv(file_path, output_dir):
+def process_csv_visualize(file_path, output_dir):
     """
     Processes a single CSV file, calculates SDF, and generates CFD and SDF visualizations.
     """
@@ -240,9 +293,9 @@ def process_csv(file_path, output_dir):
         file = csv.DictReader(filename)
         P_array = []
         U_array = []
-        pts = np.ones((40, 500))
-        p = np.zeros((40, 500))
-        u = np.zeros((40, 500))
+        pts = np.ones((height, width))
+        p = np.zeros((height, width))
+        u = np.zeros((height, width))
 
         # Extract data from CSV columns
         for col in file:
@@ -250,18 +303,18 @@ def process_csv(file_path, output_dir):
             U_array.append(float(col['Umean_center']))
 
         # Map data into the domain (4x50 mm)
-        for i in range(40):
-            for j in range(500):
-                p[i, j] = P_array[j + i * 500]
-                u[i, j] = U_array[j + i * 500]
-                if P_array[j + i * 500] == 0:
+        for i in range(height):
+            for j in range(width):
+                p[i, j] = P_array[j + i * width]
+                u[i, j] = U_array[j + i * width]
+                if P_array[j + i * width] == 0:
                     pts[i, j] = 1
                 else:
                     pts[i, j] = -1
 
         # Compute SDF (Signed Distance Function)
         phi = pts
-        d_x = 4 / 40
+        d_x = 4 / height
         d = skfmm.distance(phi, d_x)
 
         # Create output visualizations
@@ -275,13 +328,16 @@ def process_csv(file_path, output_dir):
         plot_image(U, "Test_CFD_", "Umean", 3, file_output_dir)
 
         # Generate additional SDF visualizations
-        generate_sdf_visualization(phi, file_output_dir, csv_name)
+        #generate_sdf_visualization(phi, file_output_dir, csv_name)
+
+        # Resize to (64,512)
+
 
 # Apply to all CSV files in the processed folder
 def process_all_csvs_with_plots(output_folder):
     processed_folder = Path(output_folder) / "processed"
     for csv_file in Path(processed_folder).glob("*.csv"):
-        process_csv(csv_file, Path(output_folder))
+        process_csv_visualize(csv_file, Path(output_folder))
 
 
 def main(zip_path, output_folder):
@@ -301,10 +357,11 @@ def main(zip_path, output_folder):
 if __name__ == "__main__":
     # Setup argument parser
     parser = argparse.ArgumentParser(description='Process and extract data from a zip file containing CSVs.')
-    
+    width = 512
+    height = 64
     # Add arguments with default values
-    parser.add_argument('--zip_path', type=str, nargs='?', default='./Case_100.zip', help='Path to the zip folder (default: ./Case_15.zip).')
-    parser.add_argument('--output_folder', type=str, nargs='?', default='./output_folder', help='Directory where extracted and processed files will be saved (default: ./output_folder).')
+    parser.add_argument('--zip_path', type=str, nargs='?', default='./Case_10.zip', help='Path to the zip folder.')
+    parser.add_argument('--output_folder', type=str, nargs='?', default='./output_folder', help='Directory where extracted and processed files will be saved.')
 
     # Parse arguments
     args = parser.parse_args()

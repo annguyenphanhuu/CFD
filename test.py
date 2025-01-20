@@ -16,55 +16,6 @@ from tensorflow.keras.models import load_model
 #model_name = 'model_ckpt_T_ibm_256/'
 
 model_name = './training_GAN_CFD/model_ckpt/'
-# load data
-def load_data(data_file, nx, ny, nx_new, ny_new):
-    try:
-        # Read data
-        data = pd.read_csv(data_file)
-        
-        # Check exist column
-        required_columns = ['y_center', 'z_center', 'p_center', 'Umean_center']
-        if not all(col in data.columns for col in required_columns):
-            print("Missing required columns in CSV file!")
-            return []
-        
-        # Get column's value
-        xlist = data['y_center'].values
-        ylist = data['z_center'].values
-        temp = data['p_center'].values
-        vx = data['Umean_center'].values
-        
-        # Process
-        data_size = nx * ny
-        if len(xlist) == data_size:
-            if nx == nx_new or nx_new is None:
-                xcor = np.ones((nx, ny))
-                ycor = np.ones((nx, ny))
-                P_array = np.ones((nx, ny))
-                U_array = np.ones((nx, ny))
-                for i in range(nx):
-                    for j in range(ny):
-                        xcor[i, j] = xlist[(j + nx * i)]
-                        ycor[i, j] = ylist[(j + nx * i)]
-                        P_array[i, j] = temp[(j + nx * i)]
-                        U_array[i, j] = vx[(j + nx * i)]
-            else:
-                # Interpolate
-                XN, YN = np.meshgrid(
-                    np.linspace(min(xlist), max(xlist), nx_new),
-                    np.linspace(min(ylist), max(ylist), ny_new),
-                )
-                P_array = griddata((xlist, ylist), temp, (XN, YN), method='nearest')
-                U_array = griddata((xlist, ylist), vx, (XN, YN), method='nearest')
-                xcor = XN
-                ycor = YN
-            return xcor, ycor, P_array, U_array
-        else:
-            print("Missing data file!")
-            return []
-    except ValueError as e:
-        print(f"Error processing data file: {e}")
-        return []
 
 # generate a batch of images, returns images and targets
 def generate_fake_samples(g_model, X_realA, patch_shape):
@@ -89,16 +40,21 @@ def plot_image(var, pretext, fieldname, flag, vmin=None, vmax=None):
         labeltxt = 'Pressure (Pa)'
     elif flag == 3:
         labeltxt = 'U mean (m/s)'
+    elif flag == 4:
+        labeltxt = '% Error'
+
+    var[np.isinf(var)] = np.nan
+    var = np.clip(var, vmin, vmax)
 
     Z, Y = np.meshgrid(np.linspace(0, 50, 512), np.linspace(0, 4, 64))
     fig, ax = plt.subplots()
-    im = ax.imshow(var, vmin=vmin, vmax=vmax, origin='lower',
-                   extent=[Z.min(), Z.max(), Y.min(), Y.max()])
+    # im = ax.imshow(var, vmin=vmin, vmax=vmax, origin='lower',
+    #                extent=[Z.min(), Z.max(), Y.min(), Y.max()])
     ax.set_aspect('equal', adjustable='box')
     contour = ax.contourf(Z, Y, var, 50, cmap=plt.cm.rainbow, vmin=vmin, vmax=vmax)
     fig.colorbar(contour, ax=ax, label=labeltxt)
 
-    if "error" in pretext.lower():
+    if "error_abs" in pretext.lower():
         total_value = np.sum(var)
         ax.text(0.05, 5, f'Total: {total_value:.2f}', transform=ax.transAxes,
                 fontsize=12, color='white', backgroundcolor='black',
@@ -108,34 +64,6 @@ def plot_image(var, pretext, fieldname, flag, vmin=None, vmax=None):
     plt.savefig('./model_evaluation/' + pretext + fieldname + '.png')
     plt.close(fig)
     
-# generate samples and save as a plot and save the model
-def model_prediction(step, g_model, x_test_1, y_test_2, test_size, field):
-    # Generate a batch of fake samples
-    ix = random.randint(0, test_size - 1)
-    X_fakeB, _ = generate_fake_samples(g_model, x_test_1[[ix]], 1)
-
-    X = x_test_1[ix]
-    X = np.squeeze(X, axis=2)
-    y = X_fakeB[0]
-    y = np.squeeze(y, axis=2)
-    Y = y_test_2[ix]
-    Y = np.squeeze(Y, axis=2)
-
-    y_error = abs(Y - y)
-
-    print('X shape', X.shape)
-    print('Y shape', Y.shape)
-    print('y shape', y.shape)
-
-    vmin = max(y_error.min(), Y.min(), y.min())
-    vmax = max(y_error.max(), Y.max(), y.max())
-    plot_image(X, str(step + 1) + '_Boundary_', field, 1, vmin=X.min(), vmax=X.max())
-    plot_image(Y, str(step + 1) + '_CFD_', field, 3, vmin=vmin, vmax=vmax)
-    plot_image(y, str(step + 1) + '_Predict_', field, 3, vmin=vmin, vmax=vmax)
-
-    # Calculate and plot the error
-    plot_image(y_error, str(step + 1) + '_error_abs_', field, 3, vmin=vmin, vmax=vmax)
-
 # load model using tf.keras
 model = load_model('./'+model_name+'model_G.keras', compile=False)
 bnd_array = []
@@ -167,7 +95,7 @@ for file_path in os.listdir(processed_folder):
           pts[i, j] = -1
 
     # Compute SDF (Signed Distance Function)
-    pts = cv2.resize(pts, (512, 64), interpolation=cv2.INTER_NEAREST)
+    #pts = cv2.resize(pts, (512, 64), interpolation=cv2.INTER_NEAREST)
     phi = pts
     d_x = 4 / 64
     d = skfmm.distance(phi, d_x)
@@ -175,25 +103,15 @@ for file_path in os.listdir(processed_folder):
     bnd = np.array(d)
     bnd_array.append(bnd)
 
-  if os.path.isfile(processed_folder + file_path):
-    print("processing mean file:", file_path)
-    data_list = load_data(processed_folder + file_path,500,40,512,64)
-    if len(data_list) > 0:
-  # get data list in field
-      [y_center,z_center,p_center,Umean_center] = data_list
-      P_array = np.asarray(p_center)
-      U_array = np.asarray(Umean_center)
-      sflow_P_array.append(P_array)
-      sflow_U_array.append(U_array)
-    else:
-      print('error data list!')
+train_size = int(0.85 * len(bnd_array))
+test_size = len(bnd_array) - train_size
 
-x_train_1 = bnd_array[:1000]
-x_test_1 = bnd_array[-15:]
-y_train_1 = sflow_P_array[:1000]
-y_test_1 = sflow_P_array[-15:]
-y_train_2 = sflow_U_array[:1000]
-y_test_2 = sflow_U_array[-15:]
+x_train_1 = bnd_array[:train_size]
+x_test_1 = bnd_array[-test_size:]
+y_train_1 = sflow_P_array[:train_size]
+y_test_1 = sflow_P_array[-test_size:]
+y_train_2 = sflow_U_array[:train_size]
+y_test_2 = sflow_U_array[-test_size:]
 
 x_train_1 = np.asarray(x_train_1).astype('float32')
 y_train_1 = np.asarray(y_train_1).astype('float32')
@@ -228,7 +146,7 @@ file_path = './model_evaluation/error_test_UX_ibm_cylinder.csv'
 os.makedirs(os.path.dirname(file_path), exist_ok=True)
 with open('./model_evaluation/error_test_UX_ibm_cylinder.csv', "w") as csv_file:
   writer = csv.writer(csv_file)
-  writer.writerow(['Test ID', 'Error max (%)'])
+  writer.writerow(['Test ID', 'Error max (%)', 'Error mean'])
   for ix in range(data_size):
     X_fakeB, _ = generate_fake_samples(model, x_test_1[[ix]], 1)
 	
@@ -246,6 +164,7 @@ with open('./model_evaluation/error_test_UX_ibm_cylinder.csv', "w") as csv_file:
     plot_image(Y,str(ix)+'_CFD_',field,flag, vmin=vmin, vmax=vmax)
     plot_image(y,str(ix)+'_Predict_',field,flag, vmin=vmin, vmax=vmax)
     plot_image(y_error,str(ix)+'_error_abs_', field, 3, vmin=vmin, vmax=vmax)
+    plot_image(y_error/Y*100,str(ix)+'_error_%_', field, 4, vmin=0, vmax=100)
     
     ymax = Y.max()
     ymean = np.mean(y_test_1[ix])
@@ -264,13 +183,13 @@ with open('./model_evaluation/error_test_UX_ibm_cylinder.csv', "w") as csv_file:
     max_index = np.unravel_index(max_index, y_error.shape)
     Error_percentage_max = (y_error[max_index] / Y[max_index]) * 100
 
-    Error_percentage_avg = np.sum(np.where(Y == 0, 0, (y_error / Y) * 100)) / (64*512)
+    Error_avg = np.sum(y_error)/(64*512)
 
     print('Error max:',Error_max)
     print('Error percentage max:',Error_percentage_max)
-    print('Error percentage average:',Error_percentage_avg)
-    writer.writerow([str(ix),str(Error_percentage_max)])
-
+    print('Error average:',Error_avg)
+    writer.writerow([str(ix),str(Error_percentage_max),str(Error_avg)])
+    
     Error_list.append(Error_mean)
 
 errors_avg = sum_error/data_size

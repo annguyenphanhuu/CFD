@@ -7,3 +7,8 @@ Case_*.zip
 test_interpolate.py
 train_fit.py
 30HINH3D.zip
+DATA/
+RESULT/
+30_case_duyanh/
+100_case_si
+__pycache__/
