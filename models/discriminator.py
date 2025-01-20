@@ -26,11 +26,11 @@ def define_discriminator(image_shape = (64,512,1)):
 	d = BatchNormalization()(d)
 	d = LeakyReLU(alpha=0.2)(d)
 	# C256
-	d = Conv2D(256, (4,4), strides=(2,2), padding='same', kernel_initializer=init)(d)
+	d = Conv2D(512, (4,4), strides=(2,2), padding='same', kernel_initializer=init)(d)
 	d = BatchNormalization()(d)
 	d = LeakyReLU(alpha=0.2)(d)
 	# C512
-	d = Conv2D(512, (4,4), strides=(2,2), padding='same', kernel_initializer=init)(d)
+	d = Conv2D(1024, (4,4), strides=(2,2), padding='same', kernel_initializer=init)(d)
 	d = BatchNormalization()(d)
 	d = LeakyReLU(alpha=0.2)(d)
 	# second last output layer
@@ -43,7 +43,7 @@ def define_discriminator(image_shape = (64,512,1)):
 	# define model
 	model = Model([in_src_image, in_target_image], patch_out)
 	# compile model
-	opt = Adam(learning_rate=0.001, beta_1=0.5)
+	opt = Adam(learning_rate=0.002, beta_1=0.5)
 	# slow weight update to 1 in respect to generator
 	model.compile(loss='binary_crossentropy', optimizer=opt, loss_weights=[1])
 	return model
