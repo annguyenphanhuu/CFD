@@ -98,7 +98,51 @@ def load_data(data_file, nx, ny, nx_new, ny_new):
         print(f"Error processing data file: {e}")
         return []
 
+def plot_image(savepath, var, pretext, fieldname, flag, vmin=None, vmax=None):
+    """
+    Generates and saves images for the given data array, highlighting the maximum value if applicable.
+    """
+    if flag == 1:
+        labeltxt = 'SDF Boundary'
+    elif flag == 2:
+        labeltxt = 'Pressure (Pa)'
+    elif flag == 3:
+        labeltxt = 'U mean (m/s)'
+    elif flag == 4:
+        labeltxt = '% Error'
 
+    var[np.isinf(var)] = np.nan
+    var = np.clip(var, vmin, vmax)
+
+    Z, Y = np.meshgrid(np.linspace(0, 50, var.shape[1]), np.linspace(0, 4, var.shape[0]))
+    fig, ax = plt.subplots()
+    ax.set_aspect('equal', adjustable='box')
+    contour = ax.contourf(Z, Y, var, 50, cmap=plt.cm.rainbow, vmin=vmin, vmax=vmax)
+    fig.colorbar(contour, ax=ax, label=labeltxt)
+
+    if "error_abs" in pretext.lower():
+        total_value = np.nansum(var)
+        ax.text(0.05, 4.05, f'Total: {total_value:.2f}', transform=ax.transAxes,
+                fontsize=12, color='white', backgroundcolor='black',
+                verticalalignment='top')
+
+        # Find the maximum value and its index
+        max_index = np.nanargmax(var)
+        max_coords = np.unravel_index(max_index, var.shape)
+        max_z, max_y = Z[max_coords[0], max_coords[1]], Y[max_coords[0], max_coords[1]]
+
+        # Highlight the maximum value
+        ax.scatter(max_z, max_y, color='red', s=5, label='Max Value')
+        ax.text(
+          max_z, max_y, f'{var[max_coords]:.4f}', 
+          color='yellow', fontsize=11, fontweight=550,
+          ha='left', va='bottom', 
+          bbox=dict(facecolor='black', edgecolor='none', alpha=0.0)  # Set transparency with alpha
+        )
+
+    # Save the plot
+    plt.savefig(savepath + pretext + fieldname + '.png')
+    plt.close(fig)
 
 def print_memory_usage():
     process = psutil.Process(os.getpid())

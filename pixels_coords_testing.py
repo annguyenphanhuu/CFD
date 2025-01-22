@@ -181,7 +181,6 @@ def process_csv_with_pixel_coordinates_nearest(input_csv, output_csv):
     # Replace Pressure < 0 to Pressure = 0
     P_all[P_all < 0] = 0
     # N -> Pa
-    P_all *= 1072.033
     U_all = arr[:, 4]  # velocity magnitude
     points = np.column_stack((Y_all, Z_all))
 
@@ -223,6 +222,7 @@ def process_csv_with_pixel_coordinates_nearest(input_csv, output_csv):
 
     output_data = [[y_final[i], z_final[j], P_final[i, j], U_final[i, j]] for i in range(ny_final) for j in range(nz_final)]
     df_out = pd.DataFrame(output_data, columns=['y_center', 'z_center', 'p_center', 'Umean_center'])
+    df_out['p_convert'] = df_out['p_center'] * 1072.033
     df_out.to_csv(output_csv, index=False)
     print(f"Nearest interpolation: {output_csv}")
 
@@ -281,7 +281,7 @@ def process_csv_visualize(file_path, output_dir):
     """
     Processes a single CSV file, calculates SDF, and generates CFD and SDF visualizations.
     """
-    print(f"Processing file: {file_path.name}")
+    print(f"Plot image: {file_path.name}")
 
     # Create a folder for this CSV file's output images
     csv_name = file_path.stem  # Get the file name without extension
@@ -299,7 +299,7 @@ def process_csv_visualize(file_path, output_dir):
 
         # Extract data from CSV columns
         for col in file:
-            P_array.append(float(col['p_center']))
+            P_array.append(float(col['p_convert']))
             U_array.append(float(col['Umean_center']))
 
         # Map data into the domain (4x50 mm)

@@ -18,9 +18,10 @@ from keras import backend as K
 import gc
 import psutil
 from scipy.interpolate import griddata
-
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from models import *
-from utils import *
+from utils import generate_fake_samples, generate_real_samples, plot_image
 import argparse
 
 def str2bool(v):
@@ -37,43 +38,12 @@ parser = argparse.ArgumentParser(description='Input option for training GAN CFD 
 parser.add_argument("-c", "--checkpoint", default=False, help="Whether load checkpoint for training", type=str2bool)
 parser.add_argument("-e", "--epocheval", default=1, help="Number of epoch for each evaluation", type=int)
 parser.add_argument("-n", "--numepoch", default=10000, help="Number of epoch for training iteration", type=int)
-parser.add_argument("-t", "--trainpath", default='100_case_si/processed/', help="training directory input", type=str)
-parser.add_argument("-d", "--directory", default='training_GAN_CFD/', help="training directory output", type=str)
+parser.add_argument("-t", "--trainpath", default='30_case_duyanh/processed/', help="training directory input", type=str)
+parser.add_argument("-d", "--directory", default='U/training_U/', help="training directory output", type=str)
 args = parser.parse_args()
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-
-def plot_image(var, pretext, fieldname, flag, vmin=None, vmax=None):
-	"""
-	Generates and saves images for the given data array.
-	"""
-	if flag == 1:
-		labeltxt = 'SDF Boundary'
-	elif flag == 2:
-		labeltxt = 'Pressure (N)'
-	elif flag == 3 and "error" in pretext.lower():
-		labeltxt = 'U Error(m/s)'
-	else:
-		labeltxt = 'U(m/s)'
-
-	Z, Y = np.meshgrid(np.linspace(0, 50, 512), np.linspace(0, 4, 64))
-	fig, ax = plt.subplots()
-	im = ax.imshow(var, vmin=vmin, vmax=vmax, origin='lower',
-					extent=[Z.min(), Z.max(), Y.min(), Y.max()])
-	ax.set_aspect('equal', adjustable='box')
-	contour = ax.contourf(Z, Y, var, 50, cmap=plt.cm.rainbow, vmin=vmin, vmax=vmax)
-	fig.colorbar(contour, ax=ax, label=labeltxt)
-
-	if "error" in pretext.lower():
-		total_value = np.sum(var)
-		ax.text(0.05, 5, f'Total: {total_value:.2f}', transform=ax.transAxes,
-				fontsize=12, color='white', backgroundcolor='black',
-				verticalalignment='top')
-
-	# Save the plot
-	plt.savefig(args.directory + pretext + fieldname + '.png')
-	plt.close(fig)
-    
+ 
 # generate samples and save as a plot and save the model
 def summarize_performance(step, g_model, x_test_1, y_test_2, test_size, field):
 	# Generate a batch of fake samples
@@ -89,7 +59,7 @@ def summarize_performance(step, g_model, x_test_1, y_test_2, test_size, field):
 
 	y_error = abs(Y - y)
 
-	vmin = max(y_error.min(), Y.min(), y.min())
+	vmin = min(y_error.min(), Y.min(), y.min())
 	vmax = max(y_error.max(), Y.max(), y.max())
 
 	print('X shape', X.shape)
@@ -97,12 +67,12 @@ def summarize_performance(step, g_model, x_test_1, y_test_2, test_size, field):
 	print('y shape', y.shape)
 
 	# Plot each variable with its own min and max
-	plot_image(X, str(step + 1) + '_Boundary_', field, 1, vmin=X.min(), vmax=X.max())
-	plot_image(Y, str(step + 1) + '_CFD_', field, 3, vmin=vmin, vmax=vmax)
-	plot_image(y, str(step + 1) + '_Predict_', field, 3, vmin=vmin, vmax=vmax)
+	plot_image(args.directory, X, str(step + 1) + '_Boundary_', field, 1, vmin=X.min(), vmax=X.max())
+	plot_image(args.directory, Y, str(step + 1) + '_CFD_', field, 3, vmin=vmin, vmax=vmax)
+	plot_image(args.directory, y, str(step + 1) + '_Predict_', field, 3, vmin=vmin, vmax=vmax)
 
 	# Calculate and plot the error
-	plot_image(y_error, str(step + 1) + '_error_abs_', field, 3, vmin=vmin, vmax=vmax)
+	plot_image(args.directory, y_error, str(step + 1) + '_error_abs_', field, 3, vmin=vmin, vmax=vmax)
 
 # train pix2pix models
 def train(d_model, g_model, gan_model, n_epochs=args.numepoch, batch_size=1):
@@ -207,7 +177,7 @@ def train(d_model, g_model, gan_model, n_epochs=args.numepoch, batch_size=1):
 	total_val = []
 	min_eval = -1
 
-	dir_name = './training_GAN_CFD/'
+	
 	if not os.path.exists(dir_name):
 		os.makedirs(dir_name)
 	
@@ -297,7 +267,7 @@ def train(d_model, g_model, gan_model, n_epochs=args.numepoch, batch_size=1):
 			plt.legend(loc="upper center")
 			plt.xlabel("Epoch number")
 			plt.ylabel("Training loss")
-			plt.savefig('./training_GAN_CFD/training_D_loss.png')
+			plt.savefig(dir_name + 'training_D_loss.png')
 
 			fig2 = plt.figure()
 			fig2 = plt.subplots()
@@ -305,7 +275,7 @@ def train(d_model, g_model, gan_model, n_epochs=args.numepoch, batch_size=1):
 			plt.legend(loc="upper center")
 			plt.xlabel("Epoch number")
 			plt.ylabel("Training loss")
-			plt.savefig('./training_GAN_CFD/training_G_loss.png')
+			plt.savefig(dir_name + 'training_G_loss.png')
 
 			fig3 = plt.figure()
 			fig3 = plt.subplots()
@@ -313,11 +283,11 @@ def train(d_model, g_model, gan_model, n_epochs=args.numepoch, batch_size=1):
 			plt.legend(loc="upper center")
 			plt.xlabel("Epoch number")
 			plt.ylabel("Validation loss")
-			plt.savefig('./training_GAN_CFD/validation_loss.png')
+			plt.savefig(dir_name + 'validation_loss.png')
 			plt.close('all')
 
 			if (i+1) % (bat_per_epo) == 0:
-				dir_model_name = './training_GAN_CFD/model_ckpt/'
+				dir_model_name = dir_name + 'model_ckpt/'
 				if not os.path.exists(dir_model_name):
 					os.makedirs(dir_model_name)
 				filename1 = dir_model_name+ "model_G.keras"
@@ -333,11 +303,12 @@ def train(d_model, g_model, gan_model, n_epochs=args.numepoch, batch_size=1):
 # LOAD TRAINING CHECKPOINTS
 image_shape = (64,512,1)
 chkpt = args.checkpoint
+dir_name = './U/training_U/'
 
 if chkpt == True:
-	d_model = load_model('./training_GAN_CFD/model_ckpt/model_D.keras')
-	g_model = load_model('./training_GAN_CFD/model_ckpt/model_G.keras')
-	gan_model = load_model('./training_GAN_CFD/model_ckpt/model_GAN.keras')
+	d_model = load_model(dir_name + 'model_ckpt/model_D.keras')
+	g_model = load_model(dir_name + 'model_ckpt/model_G.keras')
+	gan_model = load_model(dir_name + 'model_ckpt/model_GAN.keras')
 else:
 	# define the models
 	d_model = define_discriminator(image_shape)
