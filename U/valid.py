@@ -141,7 +141,7 @@ with open(eval_name + 'error_test_UX_ibm_cylinder.csv', "w") as csv_file:
     plot_image(eval_name, Y,str(ix)+'_CFD_',field,flag, vmin=vmin, vmax=vmax)
     plot_image(eval_name, y,str(ix)+'_Predict_',field,flag, vmin=vmin, vmax=vmax)
     plot_image(eval_name, y_error,str(ix)+'_error_abs_', field, 3, vmin=vmin, vmax=vmax)
-    plot_image(eval_name, y_error/Y*100,str(ix)+'_error_%_', field, 4, vmin=0, vmax=100)
+    plot_image(eval_name, y_error/Y*100,str(ix)+'_error_%_', field, 4, vmin=0, vmax=100, rotate_contour=True)
     
     sum_err = np.sum(y_error)
     err_avg = sum_err/(64*512)

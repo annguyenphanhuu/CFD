@@ -12,5 +12,8 @@ python U/train.py --trainpath './100_case_si/processed/' --checkpoint False --ep
 --directory 'U/training_U/'
 
 ### Training P
-python U/train.py --trainpath './100_case_si/processed/' --checkpoint False --epocheval 1 --numepoch 10000
+python P/train.py --trainpath './100_case_si/processed/' --checkpoint False --epocheval 1 --numepoch 10000
 --directory 'P/training_P/'
+
+## Evaluation
+python U/valid.py

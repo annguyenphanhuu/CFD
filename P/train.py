@@ -53,9 +53,9 @@ def summarize_performance(step, g_model, x_test_1, y_test_1, test_size, field):
 
 	X = x_test_1[ix]
 	X = np.squeeze(X, axis=2)
-	y = X_fakeB[0] * (P_max - P_min) + P_min
+	y = X_fakeB[0] * (2 * P_max)
 	y = np.squeeze(y, axis=2)
-	Y = y_test_1[ix] * (P_max - P_min) + P_min
+	Y = y_test_1[ix] * (2 * P_max)
 	Y = np.squeeze(Y, axis=2)
 
 	y_error = abs(Y - y)
@@ -88,7 +88,6 @@ def train(g_model, n_epochs=args.numepoch, batch_size=1):
 			P_array = []
 			pts = np.ones((64,512))
 			p = np.zeros((64,512))
-			u = np.zeros((64,512))
 
 			# Extract data from CSV columns
 			for col in file:
@@ -111,9 +110,21 @@ def train(g_model, n_epochs=args.numepoch, batch_size=1):
 			bnd = np.array(d)
 			bnd_array.append(bnd)
 
-	x_train_1, x_valid_1, y_train_1, y_valid_1, train_idx, valid_idx = train_test_split(bnd_array, sflow_P_array, test_size=0.1, random_state=42, return_index=True)
-	np.savetxt('train_indices.txt', train_idx, fmt='%d')
-	np.savetxt('valid_indices.txt', valid_idx, fmt='%d')
+	bnd_array = np.array(bnd_array)
+	sflow_P_array = np.array(sflow_P_array)
+
+
+	train_idx, valid_idx = train_test_split(range(len(bnd_array)), test_size=0.1, random_state=42)
+	x_train_1 = bnd_array[train_idx]
+	x_valid_1 = bnd_array[valid_idx]
+	y_train_1 = sflow_P_array[train_idx]
+	y_valid_1 = sflow_P_array[valid_idx]	
+
+	if not os.path.exists(dir_name):
+		os.makedirs(dir_name)
+
+	np.savetxt(dir_name +'train_indices.txt', train_idx, fmt='%d')
+	np.savetxt(dir_name + 'valid_indices.txt', valid_idx, fmt='%d')
 	# train_idx = np.loadtxt('train_indices.txt', dtype=int)
 	# valid_idx = np.loadtxt('valid_indices.txt', dtype=int)
 	train_size = len(x_train_1)
@@ -134,12 +145,12 @@ def train(g_model, n_epochs=args.numepoch, batch_size=1):
 
 
 	# normalize data to range [0,1]
+	# global P_min
+	# P_min = y_train_1.min()
 	global P_max
 	P_max = y_train_1.max()
-	global P_min
-	P_min = y_train_1.min()
-	y_train_1 = (y_train_1 - P_min) / (P_max - P_min)
-	y_valid_1 = (y_valid_1 - P_min) / (P_max - P_min)
+	y_train_1 = y_train_1 / (2* P_max)
+	y_valid_1 = y_valid_1 / (2 * P_max)
 
 	print('x1 train shape',x_train_1.shape)
 	print(f'y1 shape: {y_train_1.shape}, P min = {y_train_1.min()}, P max = {y_train_1.max()}')
@@ -160,9 +171,6 @@ def train(g_model, n_epochs=args.numepoch, batch_size=1):
 	total_val = []
 	min_eval = -1
 
-	if not os.path.exists(dir_name):
-		os.makedirs(dir_name)
-	
 	if chkpt == True:
 		try:
 			with open(dir_name + 'steps.txt', 'r') as f:

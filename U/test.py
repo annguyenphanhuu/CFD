@@ -13,11 +13,13 @@ import os
 import csv
 from tensorflow.keras.models import load_model
 from sklearn.metrics.pairwise import cosine_similarity
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from utils import plot_image
 
-dir_name = './U/training_U/'
-model_name = dir_name + 'model_ckpt/'
-eval_name = dir_name + 'evaluation_valid/'
+dir_name = './U/'
+model_name = dir_name + '/training_U/model_ckpt/'
+eval_name = dir_name + 'evaluation_test/'
 
 # generate a batch of images, returns images and targets
 def generate_fake_samples(g_model, X_realA, patch_shape):

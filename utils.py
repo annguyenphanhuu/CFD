@@ -98,7 +98,7 @@ def load_data(data_file, nx, ny, nx_new, ny_new):
         print(f"Error processing data file: {e}")
         return []
 
-def plot_image(savepath, var, pretext, fieldname, flag, vmin=None, vmax=None):
+def plot_image(savepath, var, pretext, fieldname, flag, vmin=None, vmax=None, rotate_contour=False, delta_p=[0,0]):
     """
     Generates and saves images for the given data array, highlighting the maximum value if applicable.
     """
@@ -107,7 +107,7 @@ def plot_image(savepath, var, pretext, fieldname, flag, vmin=None, vmax=None):
     elif flag == 2:
         labeltxt = 'Pressure (Pa)'
     elif flag == 3:
-        labeltxt = 'U mean (m/s)'
+        labeltxt = 'U (m/s)'
     elif flag == 4:
         labeltxt = '% Error'
 
@@ -115,10 +115,22 @@ def plot_image(savepath, var, pretext, fieldname, flag, vmin=None, vmax=None):
     var = np.clip(var, vmin, vmax)
 
     Z, Y = np.meshgrid(np.linspace(0, 50, var.shape[1]), np.linspace(0, 4, var.shape[0]))
+
     fig, ax = plt.subplots()
     ax.set_aspect('equal', adjustable='box')
     contour = ax.contourf(Z, Y, var, 50, cmap=plt.cm.rainbow, vmin=vmin, vmax=vmax)
-    fig.colorbar(contour, ax=ax, label=labeltxt)
+
+    if "Delta_Pressure" in pretext.lower():
+        ax.text(
+          0, 0, f'{delta_p[0]:.4f}, {delta_p[1]:.4f}', 
+          color='yellow', fontsize=11, fontweight=550,
+          ha='left', va='bottom', 
+          bbox=dict(facecolor='black', edgecolor='none', alpha=0.0)  # Set transparency with alpha
+        )
+    if "error_%" in pretext.lower(): 
+        fig.colorbar(contour, ax=ax, label=labeltxt,orientation='horizontal')
+    else:
+        fig.colorbar(contour, ax=ax, label=labeltxt)
 
     if "error_abs" in pretext.lower():
         total_value = np.nansum(var)
@@ -143,6 +155,7 @@ def plot_image(savepath, var, pretext, fieldname, flag, vmin=None, vmax=None):
     # Save the plot
     plt.savefig(savepath + pretext + fieldname + '.png')
     plt.close(fig)
+
 
 def print_memory_usage():
     process = psutil.Process(os.getpid())

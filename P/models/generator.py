@@ -8,6 +8,34 @@ from tensorflow.keras.layers import Conv2D,Conv2DTranspose,LeakyReLU,concatenate
 from tensorflow.keras.layers import Dense,Reshape,Flatten,Activation,Concatenate
 from tensorflow.keras.layers import Dropout,BatchNormalization
 from tensorflow.keras.losses import Huber
+import torch
+import torch.nn as nn
+import tensorflow as tf
+
+def custom_mae(y_pred, y_true):
+    num_cols = y_pred.shape[1]
+    mid_col = num_cols // 2
+
+    mae_left = tf.reduce_mean(tf.abs(y_pred[:, :mid_col] - y_true[:, :mid_col])) * 5
+    mae_right = tf.reduce_mean(tf.abs(y_pred[:, mid_col:] - y_true[:, mid_col:])) * 1
+    
+    mae_loss = mae_left + mae_right
+
+    return mae_loss
+
+def max_pressure_loss(y_pred, y_true):
+    max_pred = tf.reduce_max(y_pred)
+    max_true = tf.reduce_max(y_true)
+    
+    # Tính loss giữa giá trị max
+    max_loss = tf.abs(max_pred - max_true)
+    
+    # Tính MAE cho toàn bộ dự đoán
+    mae_loss = tf.reduce_mean(tf.abs(y_pred - y_true))
+    
+    # Trọng số loss giữa max và MAE
+    total_loss = mae_loss + 0.5 * max_loss
+    return total_loss
 
 # define an encoder block
 def define_encoder_block(layer_in, n_filters, batchnorm=True):
@@ -56,14 +84,14 @@ def define_generator(image_shape = (64,512,1)):
 
 	# Bottleneck with residual connection
 	#b = Conv2D(512, (4,4), strides=(2,2), padding='same', kernel_initializer=init)(e5)
-	b = Conv2D(1024, (4,4), strides=(2,2), padding='same', kernel_initializer=init)(e5)
+	b = Conv2D(2048, (4,4), strides=(2,2), padding='same', kernel_initializer=init)(e5)
 	b = Activation('relu')(b)
 
 
 	# Decoder model with increased complexity and residual connections
 	d1 = decoder_block(b, e5, 1024)
-	d2 = decoder_block(d1, e4, 1024)  
-	d3 = decoder_block(d2, e3, 512)
+	d2 = decoder_block(d1, e4, 1024, dropout=False)  
+	d3 = decoder_block(d2, e3, 512, dropout=False)
 	d4 = decoder_block(d3, e2, 512, dropout=False)
 	d5 = decoder_block(d4, e1, 256, dropout=False)
 	# Output
@@ -71,10 +99,12 @@ def define_generator(image_shape = (64,512,1)):
 	out_image = Activation('sigmoid')(g)
 	# Define model
 	model = Model(in_image, out_image)
+
 	delta = 1.0
 	huber_loss = Huber(delta=delta)
+	
 	# compile model
 	opt = Adam(learning_rate=0.0002, beta_1=0.5)
-	model.compile(loss=huber_loss, optimizer=opt, loss_weights=[100])
+	model.compile(loss='mae', optimizer=opt, loss_weights=[100])
 	return model
 
