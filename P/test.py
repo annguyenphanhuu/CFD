@@ -151,14 +151,14 @@ y_error = []
 Error_list = []
 Error_mean = np.ones(64)
 field = 'UX'
-flag = 3
+flag = 2
 sum_error_avg = 0
 
 file_path = eval_name + 'error_test_UX_ibm_cylinder.csv'
 os.makedirs(os.path.dirname(file_path), exist_ok=True)
 with open(eval_name + 'error_test_UX_ibm_cylinder.csv', "w") as csv_file:
   writer = csv.writer(csv_file)
-  writer.writerow(['Test ID', 'Error max (m/s)', 'Error max (%)', 'Error mean (m/s)', 'Cosine Similarity'])
+  writer.writerow(['Test ID', 'Error max (Pa)', 'Error max (%)', 'Error mean (Pa)', 'Cosine Similarity'])
   for ix in range(data_size):
     X_fakeB, _ = generate_fake_samples(model, x_test_1[[ix]], 1)
 	
@@ -178,7 +178,7 @@ with open(eval_name + 'error_test_UX_ibm_cylinder.csv', "w") as csv_file:
     #plot_image(eval_name, X,str(ix)+'_Boundary_',field,1)
     plot_image(eval_name, Y,str(ix)+'_CFD_',field,flag, vmin=vmin, vmax=vmax)
     plot_image(eval_name, y,str(ix)+'_Predict_',field,flag, vmin=vmin, vmax=vmax)
-    plot_image(eval_name, y_error,str(ix)+'_error_abs_', field, 3, vmin=vmin, vmax=vmax)
+    plot_image(eval_name, y_error,str(ix)+'_error_abs_', field, flag, vmin=vmin, vmax=vmax)
     plot_image(eval_name, y_error/Y*100,str(ix)+'_error_%_', field, 4, vmin=0, vmax=100)
     
     sum_err = np.sum(y_error)

@@ -12,3 +12,5 @@ RESULT/
 130_case/
 __pycache__/
 data_insight.ipynb
+*.zip
+*case*

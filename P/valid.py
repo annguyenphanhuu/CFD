@@ -15,65 +15,32 @@ from tensorflow.keras.models import load_model
 from sklearn.metrics.pairwise import cosine_similarity
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from utils import plot_image
+from utils import plot_image, load_data
 
 dir_name = './P/'
 model_name = dir_name + '/training_P/model_ckpt/'
 eval_name = dir_name + '/evaluation_valid/'
 
 # generate a batch of images, returns images and targets
-def generate_fake_samples(g_model, X_realA, patch_shape):
-	# generate fake instance
-	X = []
-	for i in range(len(X_realA)):
-		x = g_model.predict(X_realA[[i]])
-		x = np.asarray(x[0])
-		X.append(x)
-	# create 'fake' class labels (0)
-	y = np.zeros((len(X), patch_shape, patch_shape, 1))
-	X = np.asarray(X).astype('float32')
-	return X, y
+def generate_fake_samples(g_model, cond, X_realA, patch_shape):
+  # generate fake instance
+  X = []
+  for i in range(len(X_realA)):
+    cond = np.array(cond, dtype=np.float32).reshape(1, -1)
+    x = g_model.predict([X_realA[[i]], cond])
+    x = np.asarray(x[0])
+    X.append(x)
+  # create 'fake' class labels (0)
+  y = np.zeros((len(X), patch_shape, patch_shape * 8, 1))
+  X = np.asarray(X).astype('float32')
+  return X, y
 
 
 # load model using tf.keras
 model = load_model('./'+model_name+'model_G.keras', compile=False)
-bnd_array = []
-sflow_P_array = []
-sflow_U_array = []
 
-processed_folder = "./100_case_si/processed/"
-for file_path in os.listdir(processed_folder):
-  with open(processed_folder + file_path, 'r') as filename:
-    file = csv.DictReader(filename)
-    P_array = []
-    U_array = []
-    pts = np.ones((64,512))
-    p = np.zeros((64,512))
-    u = np.zeros((64,512))
-
-    # Extract data from CSV columns
-    for col in file:
-      P_array.append(float(col['p_convert']))
-      U_array.append(float(col['Umean_center']))
-    # Map data into the domain (4x50 mm)
-    for i in range(64):
-      for j in range(512):
-        p[i, j] = P_array[i * 512 + j]
-        u[i, j] = U_array[i * 512 + j]
-        if P_array[i * 512 + j] <= 0:
-          pts[i, j] = 1
-        else:
-          pts[i, j] = -1
-    sflow_P_array.append(p)
-    sflow_U_array.append(u)
-    # Compute SDF (Signed Distance Function)
-
-    phi = pts
-    d_x = 4 / 64
-    d = skfmm.distance(phi, d_x)
-
-    bnd = np.array(d)
-    bnd_array.append(bnd)
+processed_folder = "./100_case_si_test/processed/"
+bnd_array, sflow_P_array, sflow_U_array, DeltaP_array, cond_array = load_data(processed_folder)
 
 train_idx = np.loadtxt(dir_name + '/training_P/train_indices.txt', dtype=int)
 valid_idx = np.loadtxt(dir_name + '/training_P/valid_indices.txt', dtype=int)
@@ -97,16 +64,7 @@ x_test_1 = np.array(x_test_1)
 y_test_1 = np.array(y_test_1)
 
 P_max = y_train_1.max()
-y_train_1 = y_train_1 / (2* P_max)
-
-
-
-# x_train_1 = np.asarray(x_train_1).astype('float32')
-# y_train_1 = np.asarray(y_train_1).astype('float32')
-# y_train_2 = np.asarray(y_train_2).astype('float32')
-# x_train_1 = np.expand_dims(x_train_1,axis=3)
-# y_train_1 = np.expand_dims(y_train_1,axis=3)
-# y_train_2 = np.expand_dims(y_train_2,axis=3)
+y_train_1 = y_train_1 / P_max
 
 x_test_1 = np.asarray(x_test_1).astype('float32')
 y_test_1 = np.asarray(y_test_1).astype('float32')
@@ -116,27 +74,20 @@ y_test_1 = np.expand_dims(y_test_1,axis=3)
 
 data_size = len(x_test_1)
 
-#Y_max = 50.9  # Temp 20-40
-#Y_min = 4.75
-#y_test_1 = (y_test_1 - T_min) / (T_max - T_min)
-# Y_max = 25.8  # UX 10
-# Y_min = -10.9
-# model_prediction(model, x_test_1, y_test_2, T_max, T_min, i, 'UX')
-
 y_error = []
 Error_list = []
 Error_mean = np.ones(64)
 field = 'UX'
-flag = 3
+flag = 2
 sum_error_avg = 0
 
 file_path = eval_name + 'error_test_UX_ibm_cylinder.csv'
 os.makedirs(os.path.dirname(file_path), exist_ok=True)
 with open(eval_name + 'error_test_UX_ibm_cylinder.csv', "w") as csv_file:
   writer = csv.writer(csv_file)
-  writer.writerow(['Test ID', 'Error max (m/s)', 'Error max (%)', 'Error mean (m/s)', 'Cosine Similarity'])
+  writer.writerow(['Test ID', 'Error max (Pa)', 'Error max (%)', 'Error mean (Pa)', 'Cosine Similarity'])
   for ix in range(data_size):
-    X_fakeB, _ = generate_fake_samples(model, x_test_1[[ix]], 1)
+    X_fakeB, _ = generate_fake_samples(model, cond_array[ix], x_test_1[[ix]], 1)
 	
     X = x_test_1[ix]
     X = np.squeeze(X, axis=2)
@@ -154,7 +105,7 @@ with open(eval_name + 'error_test_UX_ibm_cylinder.csv', "w") as csv_file:
     #plot_image(eval_name, X,str(ix)+'_Boundary_',field,1)
     plot_image(eval_name, Y,str(ix)+'_CFD_',field,flag, vmin=vmin, vmax=vmax)
     plot_image(eval_name, y,str(ix)+'_Predict_',field,flag, vmin=vmin, vmax=vmax)
-    plot_image(eval_name, y_error,str(ix)+'_error_abs_', field, 3, vmin=vmin, vmax=vmax)
+    plot_image(eval_name, y_error,str(ix)+'_error_abs_', field, flag, vmin=vmin, vmax=vmax)
     plot_image(eval_name, y_error/Y*100,str(ix)+'_error_%_', field, 4, vmin=0, vmax=100)
     
     sum_err = np.sum(y_error)

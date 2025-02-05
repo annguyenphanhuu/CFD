@@ -24,16 +24,7 @@ from models import *
 from utils import generate_fake_samples, generate_real_samples
 import argparse
 from sklearn.model_selection import train_test_split
-
-def str2bool(v):
-    if isinstance(v, bool):
-        return v
-    if v.lower() in ('true'):
-        return True
-    elif v.lower() in ('false'):
-        return False
-    else:
-        raise argparse.ArgumentTypeError('Boolean value expected.')
+from utils import generate_fake_samples, generate_real_samples, load_data, plot_image, summarize_performance, str2bool
 
 parser = argparse.ArgumentParser(description='Input option for training GAN CFD model')
 parser.add_argument("-c", "--checkpoint", default=False, help="Whether load checkpoint for training", type=str2bool)
@@ -45,126 +36,23 @@ args = parser.parse_args()
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
  
-def plot_image(savepath, var, pretext, fieldname, flag, vmin=None, vmax=None, delta_p=0):
-	"""
-	Generates and saves images for the given data array, highlighting the maximum value if applicable.
-	"""
-	if flag == 1:
-		labeltxt = 'SDF Boundary'
-	elif flag == 2:
-		labeltxt = 'Pressure (Pa)'
-	elif flag == 3:
-		labeltxt = 'U (m/s)'
-	elif flag == 4:
-		labeltxt = '% Error'
-
-	var[np.isinf(var)] = np.nan
-	var = np.clip(var, vmin, vmax)
-
-	Z, Y = np.meshgrid(np.linspace(0, 50, var.shape[1]), np.linspace(0, 4, var.shape[0]))
-
-	fig, ax = plt.subplots()
-	ax.set_aspect('equal', adjustable='box')
-	contour = ax.contourf(Z, Y, var, 100, cmap=plt.cm.rainbow, vmin=vmin, vmax=vmax)
-
-	fig.colorbar(contour, ax=ax, label=labeltxt)
-
-	if "delta_pressure" in pretext.lower():
-		ax.text(
-			-1, 10, f'Abs Error: {delta_p:.3f}', 
-			color='white', fontsize=11, fontweight=550,
-			ha='left', va='bottom', 
-			bbox=dict(facecolor='black', edgecolor='none', alpha=0.8)  # Set transparency with alpha
-		)
-	# Save the plot
-	plt.savefig(savepath + pretext + fieldname + '.png')
-	plt.close(fig)
-
-# generate samples and save as a plot and save the model
-def summarize_performance(step, g_model, x_test_1, y_test_1, test_size, field):
-	# Generate a batch of fake samples
-	ix = random.randint(0, test_size - 1)
-	X_fakeB, _ = generate_fake_samples(g_model, x_test_1[[ix]], 1)
-
-	X = x_test_1[ix]
-	X = np.squeeze(X, axis=2)
-
-	P = p_valid_1[ix]
-
-	y = X_fakeB[0] * P_max
-	# y = np.squeeze(y, axis=2)
-	Y = y_test_1[ix] * P_max
-	# Y = np.squeeze(Y, axis=2)
-
-	y_error = abs(Y - y)
-	print(f'Ground truth: {Y[0]}')
-	print(f'Predicted: {y[0]}')
-	print(f'Abs Error: {y_error[0]}')
-	vmin = min(y_error.min(), Y.min(), y.min())
-	vmax = max(y_error.max(), Y.max(), y.max())
-
-	# Plot each variable with its own min and max
-	#plot_image(args.directory, X, str(step + 1) + '_Delta_Pressure_', field, 1, vmin=X.min(), vmax=X.max())
-
-	plot_image(args.directory, P, str(step + 1) + '_Delta_Pressure_', field, 2, vmin=0, vmax=vmax, delta_p=y_error[0])
-	
-	#plot_image(args.directory, Y, str(step + 1) + '_CFD_', field, 2, vmin=vmin, vmax=vmax)
-	#plot_image(args.directory, y, str(step + 1) + '_Predict_', field, 2, vmin=vmin, vmax=vmax)
-
-	# Calculate and plot the error
-	#plot_image(args.directory, y_error, str(step + 1) + '_error_abs_', field, 2, vmin=vmin, vmax=vmax)
-
 # train pix2pix models
 def train(g_model, n_epochs=args.numepoch, batch_size=1):
-	# determine the output square shape of the discriminator
-	bnd_array = []
-	sflow_P_array = []
-	DeltaP_array = []
+	flag = 5
 
-	processed_folder = args.trainpath
-	for file_path in os.listdir(processed_folder):
-		with open(processed_folder + file_path, 'r') as filename:
-			file = csv.DictReader(filename)
-			P_array = []
-			pts = np.ones((64,512))
-			p = np.zeros((64,512))
-
-			# Extract data from CSV columns
-			for col in file:
-				P_array.append(float(col['p_convert']))
-			# Map data into the domain (4x50 mm)
-			for i in range(64):
-				for j in range(512):
-					p[i, j] = P_array[i * 512 + j]
-					if P_array[i * 512 + j] <= 0:
-						pts[i, j] = 1
-					else:
-						pts[i, j] = -1
-			sflow_P_array.append(p)
-			DeltaP_array.append(np.mean(p[:, 0]) - np.mean(p[:, -1]))
-
-			# Compute SDF (Signed Distance Function)
-			#pts = cv2.resize(pts, (512, 64), interpolation=cv2.INTER_NEAREST)
-			phi = pts
-			d_x = 4 / 64
-			d = skfmm.distance(phi, d_x)
-
-			bnd = np.array(d)
-			bnd_array.append(bnd)
+	bnd_array, sflow_P_array, sflow_U_array, DeltaP_array = load_data(args.trainpath)
 
 	bnd_array = np.array(bnd_array)
 	sflow_P_array = np.array(sflow_P_array)
 	DeltaP_array = np.array(DeltaP_array)
 
 	train_idx, valid_idx = train_test_split(range(len(bnd_array)), test_size=0.1, random_state=42)
-	x_train_1 = bnd_array[train_idx]
-	x_valid_1 = bnd_array[valid_idx]
-	y_train_1 = DeltaP_array[train_idx]
-	y_valid_1 = DeltaP_array[valid_idx]
+	x_train_1 = [bnd_array[i] for i in train_idx]
+	x_valid_1 = [bnd_array[i] for i in valid_idx]
+	y_train_1 = [DeltaP_array[i] for i in train_idx]
+	y_valid_1 = [DeltaP_array[i] for i in valid_idx]
 
-	# p_train_1 = sflow_P_array[train_idx]
-	global p_valid_1 
-	p_valid_1= sflow_P_array[valid_idx]
+	p_valid = [sflow_P_array[i] for i in valid_idx]
 
 	if not os.path.exists(dir_name):
 		os.makedirs(dir_name)
@@ -178,6 +66,7 @@ def train(g_model, n_epochs=args.numepoch, batch_size=1):
 
 	x_train_1 = np.asarray(x_train_1).astype('float32')
 	y_train_1 = np.asarray(y_train_1).astype('float32')
+	p_valid = np.asarray(p_valid).astype('float32')
 
 	x_train_1 = np.expand_dims(x_train_1,axis=3)
 	y_train_1 = np.expand_dims(y_train_1,axis=-1)
@@ -189,10 +78,7 @@ def train(g_model, n_epochs=args.numepoch, batch_size=1):
 	x_valid_1 = np.expand_dims(x_valid_1,axis=3)
 	y_valid_1 = np.expand_dims(y_valid_1,axis=-1)
 
-
 	# normalize data to range [0,1]
-	# global P_min
-	# P_min = y_train_1.min()
 	global P_max
 	P_max = y_train_1.max()
 	y_train_1 = y_train_1 / P_max
@@ -242,9 +128,7 @@ def train(g_model, n_epochs=args.numepoch, batch_size=1):
 		# select a batch of real samples
 		[X_realA, X_realB], y_real = generate_real_samples(x_train_1, y_train_1, idx, 1)
 		#print('debug X_labelA: '+str(X_labelA.shape))
-		
 		g_loss = g_model.train_on_batch([X_realA], [X_realB])
-		 
 		print('>%d, g[%.3f]' % (i+1, g_loss))
 		g_  += g_loss
 
@@ -273,7 +157,7 @@ def train(g_model, n_epochs=args.numepoch, batch_size=1):
 				# print('---->Saved model: %s' % (filename2))
 			#args.epocheval
 			if (i+1) % (bat_per_epo * args.epocheval) == 0:
-				summarize_performance(i, g_model, x_valid_1, y_valid_1, valid_size, 'P')
+				summarize_performance(args.directory, i, flag, g_model, x_valid_1, y_valid_1, valid_size, 'P', P_max, p=p_valid)
 			count_epoch += 1
 			total_g.append(g_ / train_size)
 			total_val.append(val_loss)

@@ -56,9 +56,8 @@ def define_generator(image_shape = (64,512,1)):
 	e5 = define_encoder_block(e4, 1024) 
 
 	# Bottleneck with residual connection
-	#b = Conv2D(512, (4,4), strides=(2,2), padding='same', kernel_initializer=init)(e5)
 	b = Conv2D(1024, (4,4), strides=(2,2), padding='same', kernel_initializer=init)(e5)
-	b = Activation('relu')(b)
+	b = Activation('relu')(b)	# (None, 1, 8, 1024)
 
 
 	# Decoder model with increased complexity and residual connections

@@ -21,18 +21,9 @@ from scipy.interpolate import griddata
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from models import *
-from utils import generate_fake_samples, generate_real_samples, plot_image
+from utils import generate_fake_samples, generate_real_samples, plot_image, load_data, summarize_performance, str2bool
 import argparse
-
-def str2bool(v):
-    if isinstance(v, bool):
-        return v
-    if v.lower() in ('true'):
-        return True
-    elif v.lower() in ('false'):
-        return False
-    else:
-        raise argparse.ArgumentTypeError('Boolean value expected.')
+from sklearn.model_selection import train_test_split
 
 parser = argparse.ArgumentParser(description='Input option for training GAN CFD model')
 parser.add_argument("-c", "--checkpoint", default=False, help="Whether load checkpoint for training", type=str2bool)
@@ -44,123 +35,42 @@ args = parser.parse_args()
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
  
-# generate samples and save as a plot and save the model
-def summarize_performance(step, g_model, x_test_1, y_test_2, test_size, field):
-	# Generate a batch of fake samples
-	ix = random.randint(0, test_size - 1)
-	X_fakeB, _ = generate_fake_samples(g_model, x_test_1[[ix]], 1)
-
-	X = x_test_1[ix]
-	X = np.squeeze(X, axis=2)
-	y = X_fakeB[0] 
-	y = np.squeeze(y, axis=2)
-	Y = y_test_2[ix]
-	Y = np.squeeze(Y, axis=2)
-
-	y_error = abs(Y - y)
-
-	vmin = min(y_error.min(), Y.min(), y.min())
-	vmax = max(y_error.max(), Y.max(), y.max())
-
-	print('X shape', X.shape)
-	print('Y shape', Y.shape)
-	print('y shape', y.shape)
-
-	# Plot each variable with its own min and max
-	plot_image(args.directory, X, str(step + 1) + '_Boundary_', field, 1, vmin=X.min(), vmax=X.max())
-	plot_image(args.directory, Y, str(step + 1) + '_CFD_', field, 3, vmin=vmin, vmax=vmax)
-	plot_image(args.directory, y, str(step + 1) + '_Predict_', field, 3, vmin=vmin, vmax=vmax)
-
-	# Calculate and plot the error
-	plot_image(args.directory, y_error, str(step + 1) + '_error_abs_', field, 3, vmin=vmin, vmax=vmax)
-
 # train pix2pix models
 def train(d_model, g_model, gan_model, n_epochs=args.numepoch, batch_size=1):
 	# determine the output square shape of the discriminator
 	n_patch = d_model.output_shape[1]
-	bnd_array = []
-	sflow_P_array = []
-	sflow_U_array = []
+	flag = 3
 
-	processed_folder = args.trainpath
-	for file_path in os.listdir(processed_folder):
-		with open(processed_folder + file_path, 'r') as filename:
-			file = csv.DictReader(filename)
-			P_array = []
-			U_array = []
-			pts = np.ones((64,512))
-			p = np.zeros((64,512))
-			u = np.zeros((64,512))
+	bnd_array, sflow_P_array, sflow_U_array, DeltaP_array = load_data(args.trainpath)
+	
+	train_idx, valid_idx = train_test_split(range(len(bnd_array)), test_size=0.1, random_state=42)
+	x_train_1 = [bnd_array[i] for i in train_idx]
+	x_valid_1 = [bnd_array[i] for i in valid_idx]
+	y_train_2 = [sflow_U_array[i] for i in train_idx]
+	y_valid_2 = [sflow_U_array[i] for i in valid_idx]	
 
-			# Extract data from CSV columns
-			for col in file:
-				P_array.append(float(col['p_center']))
-				U_array.append(float(col['Umean_center']))
-			# Map data into the domain (4x50 mm)
-			for i in range(64):
-				for j in range(512):
-					p[i, j] = P_array[i * 512 + j]
-					u[i, j] = U_array[i * 512 + j]
-					if P_array[i * 512 + j] <= 0:
-						pts[i, j] = 1
-					else:
-						pts[i, j] = -1
-			sflow_P_array.append(p)
-			sflow_U_array.append(u)
-			# Compute SDF (Signed Distance Function)
-			#pts = cv2.resize(pts, (512, 64), interpolation=cv2.INTER_NEAREST)
-			phi = pts
-			d_x = 4 / 64
-			d = skfmm.distance(phi, d_x)
+	if not os.path.exists(dir_name):
+		os.makedirs(dir_name)
 
-			bnd = np.array(d)
-			bnd_array.append(bnd)
-
-		
-		
-	train_size = int(0.9 * len(bnd_array)+1)
-	valid_size = len(bnd_array) - train_size
-
-	x_train_1 = bnd_array[:train_size]
-	x_valid_1 = bnd_array[-valid_size:]
-
-	y_train_1 = sflow_P_array[:train_size]
-	y_valid_1 = sflow_P_array[-valid_size:]
-
-	y_train_2 = sflow_U_array[:train_size]
-	y_valid_2 = sflow_U_array[-valid_size:]
+	np.savetxt(dir_name +'train_indices.txt', train_idx, fmt='%d')
+	np.savetxt(dir_name + 'valid_indices.txt', valid_idx, fmt='%d')
 
 	train_size = len(x_train_1)
 	valid_size = len(x_valid_1)
 
 	x_train_1 = np.asarray(x_train_1).astype('float32')
-	y_train_1 = np.asarray(y_train_1).astype('float32')
 	y_train_2 = np.asarray(y_train_2).astype('float32')
 	x_train_1 = np.expand_dims(x_train_1,axis=3)
-	y_train_1 = np.expand_dims(y_train_1,axis=3)
 	y_train_2 = np.expand_dims(y_train_2,axis=3)
 
 	x_valid_1 = np.asarray(x_valid_1).astype('float32')
-	y_valid_1 = np.asarray(y_valid_1).astype('float32')
 	y_valid_2 = np.asarray(y_valid_2).astype('float32')
 	x_valid_1 = np.expand_dims(x_valid_1,axis=3)
-	y_valid_1 = np.expand_dims(y_valid_1,axis=3)
 	y_valid_2 = np.expand_dims(y_valid_2,axis=3)
 
-	# normalize data to range [0,1]
-	# U_max = y_train_2.max()
-	# U_min = y_train_2.min()
-	# y_train_2 = (y_train_2 - U_min) / (U_max - U_min)
-	# y_train_1 = (y_train_1 - 0.5) / 0.5
-
-	# y_test_2 = (y_test_2 - U_min) / (U_max - U_min)
-	# y_test_1 = (y_test_1 - 0.5) / 0.5
-	
 	print('x1 train shape',x_train_1.shape)
-	print(f'y1 shape: {y_train_1.shape}, P min = {y_train_1.min()}, P max = {y_train_1.max()}')
 	print(f'y2 shape: {y_train_2.shape}, U min = {y_train_2.min()}, U max = {y_train_2.max()}')
 	print('x1 valid shape',x_valid_1.shape)
-	print(f'y1 shape: {y_valid_1.shape}, P min = {y_valid_1.min()}, P max = {y_valid_1.max()}')
 	print(f'y2 shape: {y_valid_2.shape}, U min = {y_valid_2.min()}, U max = {y_valid_2.max()}')
 	
  
@@ -177,7 +87,6 @@ def train(d_model, g_model, gan_model, n_epochs=args.numepoch, batch_size=1):
 	total_val = []
 	min_eval = -1
 
-	
 	if not os.path.exists(dir_name):
 		os.makedirs(dir_name)
 	
@@ -207,16 +116,12 @@ def train(d_model, g_model, gan_model, n_epochs=args.numepoch, batch_size=1):
 		[X_realA, X_realB], y_real = generate_real_samples(x_train_1, y_train_2, idx, n_patch)
 		#print('debug X_labelA: '+str(X_labelA.shape))
 		# generate a batch of fake samples
-		#tf.data.Dataset
 		X_fakeB, y_fake = generate_fake_samples(g_model, X_realA, n_patch)
   		# update discriminator for real samples 
 		d_loss1 = d_model.train_on_batch([X_realA, X_realB], y_real)
 		# update discriminator for generated sample
 		d_loss2 = d_model.train_on_batch([X_realA, X_fakeB], y_fake)
 		# update the generator
-		#tensorflow==2.18.0
-		#g_loss, _, g_loss1, g_loss2 = gan_model.train_on_batch([X_realA], [y_real, X_realB])
-		#tensorflow==2.17.0	 or 2.16.1
 		g_loss, g_loss1, g_loss2 = gan_model.train_on_batch([X_realA], [y_real, X_realB]) 
 		 
 		print('>%d, d1[%.3f] d2[%.3f] g[%.3f]' % (i+1, d_loss1, d_loss2, g_loss))
@@ -252,7 +157,7 @@ def train(d_model, g_model, gan_model, n_epochs=args.numepoch, batch_size=1):
 				print('---->Saved model: %s' % (filename2))
 			#args.epocheval
 			if (i+1) % (bat_per_epo * args.epocheval) == 0:
-				summarize_performance(i, g_model, x_valid_1, y_valid_2, valid_size, 'UX')
+				summarize_performance(args.directory, i, flag, g_model, x_valid_1, y_valid_2, valid_size, 'UX')
 			count_epoch += 1
 			total_d1.append(d_1 / train_size)
 			total_d2.append(d_2 / train_size)
@@ -320,5 +225,3 @@ else:
 # print(g_model.summary())
 # print(gan_model.summary())
 train(d_model, g_model, gan_model)
-
-

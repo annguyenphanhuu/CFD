@@ -20,28 +20,40 @@ import psutil
 from scipy.interpolate import griddata
 
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('true'):
+        return True
+    elif v.lower() in ('false'):
+        return False
+
+
 # select a batch of random samples, returns images and target
 def generate_real_samples(x_train_1, y_train_2, ix, patch_shape):
-	# retrieve selected images
-	X1 = []
-	X2 = []
-	for i in ix:
-		x1 = x_train_1[i]
-		X1.append(x1)
-		x2 = y_train_2[i]
-		X2.append(x2)
-	# generate 'real' class labels (1)
-	y = np.ones((len(ix), patch_shape, patch_shape * 8, 1))
-	X1 = np.asarray(X1).astype('float32')
-	X2 = np.asarray(X2).astype('float32')	
-	return [X1, X2], y
+    # retrieve selected images
+    X1 = []
+    X2 = []
+    cons_arr = []
+    for i in ix:
+        x1 = x_train_1[i]
+        X1.append(x1)
+        x2 = y_train_2[i]
+        X2.append(x2)
+        # cons = cond_array[i]
+        # cons_arr.append(cons)
+    # generate 'real' class labels (1)
+    y = np.ones((len(ix), patch_shape, patch_shape * 8, 1))
+    X1 = np.asarray(X1).astype('float32')
+    X2 = np.asarray(X2).astype('float32')	
+    return [X1, X2], y
 
 # generate a batch of images, returns images and targets
 def generate_fake_samples(g_model, X_realA, patch_shape):
 	# generate fake instance
 	X = []
 	for i in range(len(X_realA)):
-		x = g_model.predict(X_realA[[i]])
+		x = g_model.predict([X_realA[[i]]])
 		x = np.asarray(x[0])
 		X.append(x)
 	# create 'fake' class labels (0)
@@ -49,56 +61,52 @@ def generate_fake_samples(g_model, X_realA, patch_shape):
 	X = np.asarray(X).astype('float32')
 	return X, y
 
-def load_data(data_file, nx, ny, nx_new, ny_new):
-    try:
-        # Read data
-        data = pd.read_csv(data_file)
-        
-        # Check exist column
-        required_columns = ['y_center', 'z_center', 'p_center', 'Umean_center']
-        if not all(col in data.columns for col in required_columns):
-            print("Missing required columns in CSV file!")
-            return []
-        
-        # Get column's value
-        xlist = data['y_center'].values
-        ylist = data['z_center'].values
-        temp = data['p_center'].values
-        vx = data['Umean_center'].values
-        
-        # Process
-        data_size = nx * ny
-        if len(xlist) == data_size:
-            if nx == nx_new or nx_new is None:
-                xcor = np.ones((nx, ny))
-                ycor = np.ones((nx, ny))
-                P_array = np.ones((nx, ny))
-                U_array = np.ones((nx, ny))
-                for i in range(nx):
-                    for j in range(ny):
-                        xcor[i, j] = xlist[(j + nx * i)]
-                        ycor[i, j] = ylist[(j + nx * i)]
-                        P_array[i, j] = temp[(j + nx * i)]
-                        U_array[i, j] = vx[(j + nx * i)]
-            else:
-                # Interpolate
-                XN, YN = np.meshgrid(
-                    np.linspace(min(xlist), max(xlist), nx_new),
-                    np.linspace(min(ylist), max(ylist), ny_new),
-                )
-                P_array = griddata((xlist, ylist), temp, (XN, YN), method='nearest')
-                U_array = griddata((xlist, ylist), vx, (XN, YN), method='nearest')
-                xcor = XN
-                ycor = YN
-            return xcor, ycor, P_array, U_array
-        else:
-            print("Missing data file!")
-            return []
-    except ValueError as e:
-        print(f"Error processing data file: {e}")
-        return []
+def load_data(processed_folder):
+    bnd_array = []
+    sflow_P_array = []
+    sflow_U_array = []
+    DeltaP_array = []
+    cond_array = [] 
 
-def plot_image(savepath, var, pretext, fieldname, flag, vmin=None, vmax=None, rotate_contour=False, delta_p=[0,0]):
+    for file_path in os.listdir(processed_folder):
+        with open(os.path.join(processed_folder, file_path), 'r') as filename:
+            file = csv.DictReader(filename)
+            P_array = []
+            U_array = []
+            pts = np.ones((64,512))
+            p = np.zeros((64,512))
+            u = np.zeros((64,512))
+
+            # Extract data from CSV columns
+            for row in file:
+                P_array.append(float(row['p_convert']))
+                U_array.append(float(row['Umean_center']))
+
+            # Extract constriction value (first row's value)
+            # cond_array.append([float(row['cond1']), float(row['cond2']), float(row['cond3'])])
+
+            # Map data into the domain (4x50 mm)
+            for i in range(64):
+                for j in range(512):
+                    p[i, j] = P_array[i * 512 + j]
+                    u[i, j] = U_array[i * 512 + j]
+                    pts[i, j] = -1 if P_array[i * 512 + j] > 0 else 1
+
+            sflow_P_array.append(p)
+            sflow_U_array.append(u)
+            DeltaP_array.append(np.mean(p[:, 0]) - np.mean(p[:, -1]))
+
+            # Compute SDF (Signed Distance Function)
+            phi = pts
+            d_x = 4 / 64
+            d = skfmm.distance(phi, d_x)
+            bnd_array.append(np.array(d))
+
+    # Ensure there is at least one constriction value to return
+
+    return bnd_array, sflow_P_array, sflow_U_array, DeltaP_array
+
+def plot_image(savepath, var, pretext, fieldname, flag, vmin=None, vmax=None, rotate_contour=False, delta_p=0):
     """
     Generates and saves images for the given data array, highlighting the maximum value if applicable.
     """
@@ -110,6 +118,8 @@ def plot_image(savepath, var, pretext, fieldname, flag, vmin=None, vmax=None, ro
         labeltxt = 'U (m/s)'
     elif flag == 4:
         labeltxt = '% Error'
+    elif flag == 5:
+        labeltxt = 'Delta Pressure (Pa)'
 
     var[np.isinf(var)] = np.nan
     var = np.clip(var, vmin, vmax)
@@ -122,12 +132,12 @@ def plot_image(savepath, var, pretext, fieldname, flag, vmin=None, vmax=None, ro
 
     if "Delta_Pressure" in pretext.lower():
         ax.text(
-          0, 0, f'{delta_p[0]:.4f}, {delta_p[1]:.4f}', 
-          color='yellow', fontsize=11, fontweight=550,
-          ha='left', va='bottom', 
-          bbox=dict(facecolor='black', edgecolor='none', alpha=0.0)  # Set transparency with alpha
+            0, 0, f'{delta_p[0]:.4f}, {delta_p[1]:.4f}', 
+            color='yellow', fontsize=11, fontweight=550,
+            ha='left', va='bottom', 
+            bbox=dict(facecolor='black', edgecolor='none', alpha=0.0)  # Set transparency with alpha
         )
-    if "error_%" in pretext.lower(): 
+    if rotate_contour: 
         fig.colorbar(contour, ax=ax, label=labeltxt,orientation='horizontal')
     else:
         fig.colorbar(contour, ax=ax, label=labeltxt)
@@ -146,16 +156,61 @@ def plot_image(savepath, var, pretext, fieldname, flag, vmin=None, vmax=None, ro
         # Highlight the maximum value
         ax.scatter(max_z, max_y, color='red', s=5, label='Max Value')
         ax.text(
-          max_z, max_y, f'{var[max_coords]:.4f}', 
-          color='yellow', fontsize=11, fontweight=550,
-          ha='left', va='bottom', 
-          bbox=dict(facecolor='black', edgecolor='none', alpha=0.0)  # Set transparency with alpha
+            max_z, max_y, f'{var[max_coords]:.4f}', 
+            color='yellow', fontsize=11, fontweight=550,
+            ha='left', va='bottom', 
+            bbox=dict(facecolor='black', edgecolor='none', alpha=0.0)  # Set transparency with alpha
         )
-
+    if "delta_pressure" in pretext.lower():
+        ax.text(
+            -1, 10, f'Abs Error: {delta_p:.3f}', 
+            color='white', fontsize=11, fontweight=550,
+            ha='left', va='bottom', 
+            bbox=dict(facecolor='black', edgecolor='none', alpha=0.8)  # Set transparency with alpha
+        )
     # Save the plot
     plt.savefig(savepath + pretext + fieldname + '.png')
     plt.close(fig)
 
+
+# generate samples and save as a plot and save the model
+def summarize_performance(directory, step, flag, g_model, x_test_1, y_test_2, test_size, field, scale=1, p=None):
+    # Generate a batch of fake samples
+    ix = random.randint(0, test_size - 1)
+    X_fakeB, _ = generate_fake_samples(g_model, x_test_1[[ix]], 1)
+
+    X = x_test_1[ix]
+    X = np.squeeze(X, axis=2)
+
+    y = X_fakeB[0] * scale
+    
+    Y = y_test_2[ix] * scale
+    
+    if flag != 5:
+        y = np.squeeze(y, axis=2)
+        Y = np.squeeze(Y, axis=2)
+
+        y_error = abs(Y - y)
+
+        vmin = min(y_error.min(), Y.min(), y.min())
+        vmax = max(y_error.max(), Y.max(), y.max())
+
+        print('X shape', X.shape)
+        print('Y shape', Y.shape)
+        print('y shape', y.shape)
+
+        # Plot each variable with its own min and max
+        plot_image(directory, X, str(step + 1) + '_Boundary_', field, 1, vmin=X.min(), vmax=X.max())
+        plot_image(directory, Y, str(step + 1) + '_CFD_', field, flag, vmin=vmin, vmax=vmax)
+        plot_image(directory, y, str(step + 1) + '_Predict_', field, flag, vmin=vmin, vmax=vmax)
+
+        # Calculate and plot the error
+        plot_image(directory, y_error, str(step + 1) + '_error_abs_', field, flag, vmin=vmin, vmax=vmax)
+    else:
+        plot_image(directory, X, str(step + 1) + '_Boundary_', field, 1, vmin=X.min(), vmax=X.max())
+        P = p[ix]
+        y_error = abs(Y - y)
+        plot_image(directory, P, str(step + 1) + '_Delta_Pressure_', field, 2, vmin=P.min(), vmax=P.max(), delta_p=y_error[0])
 
 def print_memory_usage():
     process = psutil.Process(os.getpid())

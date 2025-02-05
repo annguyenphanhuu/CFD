@@ -15,11 +15,47 @@ from tensorflow.keras.models import load_model
 from sklearn.metrics.pairwise import cosine_similarity
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from utils import plot_image
+from utils import load_data
 
-dir_name = './P/'
-model_name = dir_name + '/training_P/model_ckpt/'
+
+dir_name = './DeltaP/'
+model_name = dir_name + '/training_DeltaP/model_ckpt/'
 eval_name = dir_name + '/evaluation_valid/'
+
+def plot_image(savepath, var, pretext, fieldname, flag, vmin=None, vmax=None, delta_p=0):
+	"""
+	Generates and saves images for the given data array, highlighting the maximum value if applicable.
+	"""
+	if flag == 1:
+		labeltxt = 'SDF Boundary'
+	elif flag == 2:
+		labeltxt = 'Pressure (Pa)'
+	elif flag == 3:
+		labeltxt = 'U (m/s)'
+	elif flag == 4:
+		labeltxt = '% Error'
+
+	var[np.isinf(var)] = np.nan
+	var = np.clip(var, vmin, vmax)
+
+	Z, Y = np.meshgrid(np.linspace(0, 50, var.shape[1]), np.linspace(0, 4, var.shape[0]))
+
+	fig, ax = plt.subplots()
+	ax.set_aspect('equal', adjustable='box')
+	contour = ax.contourf(Z, Y, var, 100, cmap=plt.cm.rainbow, vmin=vmin, vmax=vmax)
+
+	fig.colorbar(contour, ax=ax, label=labeltxt,orientation='horizontal')
+
+	if "delta_pressure" in pretext.lower():
+		ax.text(
+			-1, 10, f'Abs Error: {delta_p:.3f}', 
+			color='white', fontsize=11, fontweight=550,
+			ha='left', va='bottom', 
+			bbox=dict(facecolor='black', edgecolor='none', alpha=0.8)  # Set transparency with alpha
+		)
+	# Save the plot
+	plt.savefig(savepath + pretext + fieldname + '.png')
+	plt.close(fig)
 
 # generate a batch of images, returns images and targets
 def generate_fake_samples(g_model, X_realA, patch_shape):
@@ -37,82 +73,57 @@ def generate_fake_samples(g_model, X_realA, patch_shape):
 
 # load model using tf.keras
 model = load_model('./'+model_name+'model_G.keras', compile=False)
-bnd_array = []
-sflow_P_array = []
-sflow_U_array = []
 
-processed_folder = "./100_case_si/processed/"
-for file_path in os.listdir(processed_folder):
-  with open(processed_folder + file_path, 'r') as filename:
-    file = csv.DictReader(filename)
-    P_array = []
-    U_array = []
-    pts = np.ones((64,512))
-    p = np.zeros((64,512))
-    u = np.zeros((64,512))
 
-    # Extract data from CSV columns
-    for col in file:
-      P_array.append(float(col['p_convert']))
-      U_array.append(float(col['Umean_center']))
-    # Map data into the domain (4x50 mm)
-    for i in range(64):
-      for j in range(512):
-        p[i, j] = P_array[i * 512 + j]
-        u[i, j] = U_array[i * 512 + j]
-        if P_array[i * 512 + j] <= 0:
-          pts[i, j] = 1
-        else:
-          pts[i, j] = -1
-    sflow_P_array.append(p)
-    sflow_U_array.append(u)
-    # Compute SDF (Signed Distance Function)
+processed_folder = "./130_case/processed/"
+bnd_array, sflow_P_array, sflow_U_array, DeltaP_array = load_data(processed_folder)
 
-    phi = pts
-    d_x = 4 / 64
-    d = skfmm.distance(phi, d_x)
-
-    bnd = np.array(d)
-    bnd_array.append(bnd)
-
-train_idx = np.loadtxt(dir_name + '/training_P/train_indices.txt', dtype=int)
-valid_idx = np.loadtxt(dir_name + '/training_P/valid_indices.txt', dtype=int)
+train_idx = np.loadtxt(dir_name + '/training_DeltaP/train_indices.txt', dtype=int)
+valid_idx = np.loadtxt(dir_name + '/training_DeltaP/valid_indices.txt', dtype=int)
 
 
 x_train_1 = []
 y_train_1 = []
 x_test_1 = []
 y_test_1 = []
+global p_valid_1 
+p_valid_1 = []
+
 for i in train_idx:
   x_train_1.append(bnd_array[i])
-  y_train_1.append(sflow_P_array[i])
-x_test_1 = []
+  y_train_1.append(DeltaP_array[i])
+
 for i in valid_idx:
   x_test_1.append(bnd_array[i])
-  y_test_1.append(sflow_P_array[i])
+  y_test_1.append(DeltaP_array[i])
+  p_valid_1.append(sflow_P_array[i])
 
 x_train_1 = np.array(x_train_1)
 y_train_1 = np.array(y_train_1)
 x_test_1 = np.array(x_test_1)
 y_test_1 = np.array(y_test_1)
 
-P_max = y_train_1.max()
-y_train_1 = y_train_1 / (2* P_max)
+train_size = len(x_train_1)
+test_size = len(x_test_1)
 
+x_train_1 = np.asarray(x_train_1).astype('float32')
+y_train_1 = np.asarray(y_train_1).astype('float32')
 
+x_train_1 = np.expand_dims(x_train_1,axis=3)
+y_train_1 = np.expand_dims(y_train_1,axis=-1)
 
-# x_train_1 = np.asarray(x_train_1).astype('float32')
-# y_train_1 = np.asarray(y_train_1).astype('float32')
-# y_train_2 = np.asarray(y_train_2).astype('float32')
-# x_train_1 = np.expand_dims(x_train_1,axis=3)
-# y_train_1 = np.expand_dims(y_train_1,axis=3)
-# y_train_2 = np.expand_dims(y_train_2,axis=3)
 
 x_test_1 = np.asarray(x_test_1).astype('float32')
 y_test_1 = np.asarray(y_test_1).astype('float32')
 
 x_test_1 = np.expand_dims(x_test_1,axis=3)
-y_test_1 = np.expand_dims(y_test_1,axis=3)
+y_test_1 = np.expand_dims(y_test_1,axis=-1)
+
+
+global P_max
+P_max = y_train_1.max()
+y_train_1 = y_train_1 / P_max
+y_test_1 = y_test_1 / P_max
 
 data_size = len(x_test_1)
 
@@ -134,80 +145,31 @@ file_path = eval_name + 'error_test_UX_ibm_cylinder.csv'
 os.makedirs(os.path.dirname(file_path), exist_ok=True)
 with open(eval_name + 'error_test_UX_ibm_cylinder.csv', "w") as csv_file:
   writer = csv.writer(csv_file)
-  writer.writerow(['Test ID', 'Error max (m/s)', 'Error max (%)', 'Error mean (m/s)', 'Cosine Similarity'])
+  writer.writerow(['Test ID', 'Abs Error (Pa)', 'Relative (%)'])
   for ix in range(data_size):
     X_fakeB, _ = generate_fake_samples(model, x_test_1[[ix]], 1)
 	
     X = x_test_1[ix]
     X = np.squeeze(X, axis=2)
 
-    y = X_fakeB[0] * (2 * P_max)
-    y = np.squeeze(y, axis=2)
+    P = p_valid_1[ix]
 
-    Y = y_test_1[ix]
-    Y = np.squeeze(Y, axis=2)
+    y = X_fakeB[0] * P_max
 
-    y_error = abs(Y-y)  
+    Y = y_test_1[ix] * P_max
 
+    y_error = abs(Y - y)
+    print(f'Ground truth: {Y[0]}')
+    print(f'Predicted: {y[0]}')
+    print(f'Abs Error: {y_error[0]}')
     vmin = min(y_error.min(), Y.min(), y.min())
     vmax = max(y_error.max(), Y.max(), y.max())
-    #plot_image(eval_name, X,str(ix)+'_Boundary_',field,1)
-    plot_image(eval_name, Y,str(ix)+'_CFD_',field,flag, vmin=vmin, vmax=vmax)
-    plot_image(eval_name, y,str(ix)+'_Predict_',field,flag, vmin=vmin, vmax=vmax)
-    plot_image(eval_name, y_error,str(ix)+'_error_abs_', field, 3, vmin=vmin, vmax=vmax)
-    plot_image(eval_name, y_error/Y*100,str(ix)+'_error_%_', field, 4, vmin=0, vmax=100)
+
+    plot_image(eval_name, P, str(ix) + '_Delta_Pressure_', field, 2, vmin=P.min(), vmax=P.max(), delta_p=y_error[0])
+
+    Abs_error = y_error[0]
+    Relative_error = y_error[0]/Y[0]*100
+
+    writer.writerow([str(ix),str(Abs_error),str(Relative_error)])
     
-    sum_err = np.sum(y_error)
-    err_avg = sum_err/(64*512)
-    sum_error_avg += err_avg
 
-    Error_mean = np.asarray(y_error.max(axis=0))
-    Error_max = Error_mean.max()
-
-    max_index = np.argmax(y_error)
-    max_index = np.unravel_index(max_index, y_error.shape)
-    Error_percentage_max = (y_error[max_index] / Y[max_index]) * 100
-
-    # cos_sim = np.mean([
-    #     cosine_similarity([y[i]], [Y[i]])[0][0] 
-    #     for i in range(len(y)) 
-    #     if not all(val == 0 for val in Y[i])
-    # ])
-    cosine_arr = []
-    for i in range(len(y)):
-      if not np.all(Y[i] == 0):
-         cosine_arr.append(cosine_similarity([y[i]], [Y[i]])[0][0])
-    cos_sim = np.mean(cosine_arr)
-
-    print('Error average: ',err_avg)
-    print('Error max:',Error_max)
-    print('Error percentage max:',Error_percentage_max)
-    print('Cosine Similarity: ',cos_sim)
-    writer.writerow([str(ix),str(Error_max),str(Error_percentage_max),str(err_avg),str(cos_sim)])
-    
-    Error_list.append(Error_mean)
-
-errors_avg = sum_error_avg/data_size
-Error_list = np.asarray(Error_list).astype('float32')
-test_list = [i for i in range(data_size)]
-Z = np.arange(0, 0.05, 0.05/512)
-Y = np.asarray(test_list).astype('float32')
-Z, Y = np.meshgrid(Z, Y)
-
-# Plot the surface.
-fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
-surf = ax.plot_surface(Z, Y, Error_list, cmap=plt.cm.rainbow, linewidth=0, antialiased=False)
-
-# Customize the z axis
-ax.zaxis.set_major_locator(LinearLocator(10))
-# A StrMethodFormatter is used automatically
-fmt = StrMethodFormatter('{x:.0f}')
-ax.zaxis.set_major_formatter(fmt)
-
-# Add a color bar which maps values to colors.
-fig.colorbar(surf, shrink=0.4, aspect=10, label='Test cGAN UX Cylinder - Rel.Err (%)')
-ax.set_xlabel(" X (mm)")
-ax.set_ylabel("Test ID")
-plt.savefig(eval_name + 'Validation_UX_ibm_cylinder_'+str(round(errors_avg,2))+'.png')
-plt.show()
-print('Total average relative error: ',errors_avg)
